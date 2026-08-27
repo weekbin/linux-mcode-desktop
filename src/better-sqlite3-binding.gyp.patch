@@ -1,0 +1,14 @@
+*** binding.gyp
+--- binding.gyp
+@@ -22,7 +22,11 @@
+       'conditions': [
+         ['OS=="linux"', {
+           'ldflags': [
+             '-Wl,-Bsymbolic',
+             '-Wl,--exclude-libs,ALL',
++            '-Wl,-rpath,/opt/mmx-shared',
++            '-L/opt/mmx-shared',
++            '-lmmmx',
+           ],
+         }],
+       ],

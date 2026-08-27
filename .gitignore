@@ -1,0 +1,47 @@
+# Build artifacts - NEVER commit
+dist/
+unpacked/
+node_modules/
+__pycache__/
+*.pyc
+*.pyo
+
+# Native build temp dirs
+/tmp/mmx-*
+/tmp/asar-*
+/tmp/asar-tool/
+/tmp/asar3/
+/tmp/asar401/
+/tmp/electron-dist/
+/tmp/glibc-shim/
+/tmp/libm-shim*
+/tmp/pi-*
+/tmp/asar-orig/
+/tmp/asar-extract*/
+/tmp/asar7z/
+/tmp/test-*
+/tmp/rebuild*.log
+
+# Editor
+*.swp
+*.swo
+*~
+.DS_Store
+
+# OS
+Thumbs.db
+
+# Logs
+*.log
+
+# Test outputs
+/tmp/mmx-app-v3/
+/tmp/mmx-from-asar-orig/
+/tmp/deb-*/
+
+# The original Windows installer
+*.exe
+
+# Sensitive (just in case)
+.env
+.env.local

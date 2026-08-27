@@ -1,0 +1,27 @@
+{
+  "name": "linux-mcode-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Convert MiniMax Code Windows NSIS installer to a Linux GUI client (.deb + .tar.gz)",
+  "scripts": {
+    "build": "ELEC43_DIR=\"${ELEC43_DIR:-/home/weekbin/Works/repositories/orca/node_modules/.pnpm/electron@43.1.0/node_modules/electron}\" ./scripts/build-all.sh",
+    "build:gui": "./scripts/build-linux-gui.sh",
+    "build:deb": "./scripts/build-deb.sh",
+    "build:targz": "./scripts/build-targz.sh",
+    "build:shim": "./src/build-shim.sh",
+    "run": "./scripts/run-mmx-linux.sh"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "keywords": [
+    "electron",
+    "minimax-code",
+    "mmx-agent",
+    "linux",
+    "debian",
+    "nsis",
+    "asar"
+  ],
+  "license": "MIT"
+}

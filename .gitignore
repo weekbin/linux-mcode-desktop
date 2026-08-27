@@ -49,3 +49,6 @@ Thumbs.db
 
 # Project-specific input/working dirs (this repo's convention, never commit)
 inputs/
+
+# Build artifacts (always rebuilt on host, never commit)
+dist-lib/

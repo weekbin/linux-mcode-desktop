@@ -20,9 +20,39 @@ re-running the build or onboarding a new agent.
 > # ... restructure into unpacked/app-64/ ... (see §3.1)
 >
 > # 3) On Linux container (or Ubuntu VM): do the rest
-> ELEC43_DIR=/path/to/electron-43 npm run build   # all-in-one
+> ELEC43_DIR=/path/to/electron-43 ./scripts/build-in-container.sh
 > tools/test-ubuntu.sh 24.04                       # cross-version smoke
 > ```
+>
+> ## 0. Verified end-to-end build (Aug 2026)
+>
+> The full pipeline was **actually executed on macOS via Docker** (Apple
+> Silicon Mac, qemu amd64 emulation), producing a working
+> `dist/minimax-code_3.0.67-inside.44_amd64.deb` (163 MB). The end-to-end
+> build took ~25 min from scratch under qemu. See `git log` for `3b03c41`
+> (the asar 4.3.0 / icon fallback / better-sqlite3 v12.10.1 fixes that
+> made this possible).
+>
+> The container was auto-committed as image `mmx-build-env:latest` for
+> rebuild reuse. To rebuild from this image (skipping apt+node+electron):
+>
+> ```bash
+> ./scripts/build-in-container.sh \
+>     --from-image=mmx-build-env \
+>     --skip-deps \
+>     --save-image=mmx-build-env     # save updated image
+> ```
+>
+> Validated deb contents (post-build, all x86-64 ELF, not Windows .node):
+>
+> | File | Size | Arch |
+> |------|------|------|
+> | `app.asar.unpacked/.../better-sqlite3/build/Release/better_sqlite3.node` | 2.2 MB | ELF 64-bit LSB, x86-64, dynamically linked |
+> | `app.asar.unpacked/.../node-pty/build/Release/pty.node` | 47 KB | ELF 64-bit LSB, x86-64, dynamically linked |
+> | `app.asar.unpacked/.../@nut-tree/libnut-linux/build/Release/libnut.node` | 135 KB | ELF 64-bit LSB, x86-64, dynamically linked |
+> | `app.asar.unpacked/.../@vscode/ripgrep-linux-x64/bin/rg` | 5.7 MB | ELF 64-bit LSB, x86-64, static-pie |
+> | `libfmod_shim.so` (in `/opt/mmx-shared`) | 13.9 KB | ELF 64-bit LSB, x86-64, with `fmod@GLIBC_2.38` + `fmod@GLIBC_2.2.5` versioned symbols |
+> | `app.asar` (patched) | 416 MB | contains JS patches (GPU disable, tray, deeplink, open-external, mcode-tools) |
 
 ---
 

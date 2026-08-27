@@ -161,6 +161,8 @@ set +e  # 不要让单个错误中止整个 preinst
 
 ## 5. 端到端验证
 
+### 5.1 单版本快速测 (noble)
+
 ```bash
 # 在 Ubuntu 24.04 noble 容器:
 docker run -it --rm -v /tmp/.X11-unix:/tmp/.X11-unix -e DISPLAY ubuntu:24.04 bash
@@ -183,6 +185,68 @@ export DISPLAY=:99
 [info]  [LocalRuntime] Launch plan: buildEnv=prod
 [info]  [LocalRuntimeUtility] runtime started
 [info]  [WindowManager] Registered window: type=login, id=1
+```
+
+### 5.2 跨版本自动测试 (`tools/test-ubuntu.sh`)
+
+**支持版本** (Aug 2026):
+| 版本 | 代号 | GLIBC | 预期 | 测过 |
+|------|------|-------|------|------|
+| 20.04 | focal | 2.31 | FAIL | ❌ GLIBC 太老, V8 symbols 不全 |
+| 22.04 | jammy | 2.35 | PARTIAL | ⚠️ 装可, runtime 需 shim 链接 |
+| 24.04 | noble | 2.39 | PASS | ✅ |
+| 25.04 | plucky | 2.41 | PASS | ✅ (EOL) |
+| 25.10 | questing | 2.41+ | PASS | ✅ (短期) |
+| 26.04 | resolute | 2.43+ | PASS | ✅ |
+
+**用法**:
+```bash
+# 测所有支持版本 (推荐, 跑一次冒烟)
+tools/test-ubuntu.sh
+
+# 只测某个版本
+tools/test-ubuntu.sh 24.04
+tools/test-ubuntu.sh 26.04
+
+# 测完保留容器 (debug)
+tools/test-ubuntu.sh --no-cleanup 24.04
+
+# 自定义 deb 路径
+DEB_PATH=/path/to/deb tools/test-ubuntu.sh 24.04
+```
+
+**前置**:
+- docker (镜像会自动 pull)
+- 已 build 的 `dist/minimax-code_3.0.67-inside.44_amd64.deb`
+- 充足磁盘 (每个容器临时 ~2GB)
+
+**log 位置**: `.test-logs/<codename>.log` (在仓库内, .gitignore 排除)
+
+**exit code**:
+- 0 = 所有版本都符合预期
+- 1 = 有版本跟预期不符 (通常是新发现的 bug)
+
+### 5.3 手动 debug 单个版本
+
+```bash
+# 启动一个 24.04 容器并保持运行
+docker run -it --rm \
+    -v /path/to/deb:/tmp/minimax.deb:ro \
+    -v /tmp/.X11-unix:/tmp/.X11-unix \
+    -e DISPLAY=:99 \
+    --name mmx-debug \
+    ubuntu:24.04 bash
+
+# 在容器内:
+apt-get update && apt-get install -y libnss3 libgbm1 libxkbcommon0 xvfb
+dpkg -i /tmp/minimax.deb
+Xvfb :99 -screen 0 1280x800x24 &
+export DISPLAY=:99
+# 装 gdb / strace / ltrace 等工具调
+apt-get install -y gdb strace ltrace
+strace -f -e openat -o /tmp/strace.log /opt/MiniMax\ Code/run.sh
+# 看 better_sqlite3 加载情况
+grep -E 'better_sqlite3|libmmmx|libm' /tmp/strace.log | head -20
 ```
 
 ---

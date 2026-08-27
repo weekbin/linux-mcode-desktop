@@ -45,3 +45,4 @@ Thumbs.db
 # Sensitive (just in case)
 .env
 .env.local
+.test-logs/

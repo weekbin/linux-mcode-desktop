@@ -130,16 +130,33 @@ build_better_sqlite3() {
   log "[3/4] Rebuild better-sqlite3 from source for current GLIBC ..."
   if [ ! -f "$WORK_DIR/node_modules/better-sqlite3/build/Release/better_sqlite3.node" ]; then
     mkdir -p "$NATIVE_BUILD_DIR"
-    (cd "$NATIVE_BUILD_DIR" && $NPM init -y >/dev/null 2>&1 || true)
-    (cd "$NATIVE_BUILD_DIR" && $NPM install @electron/rebuild --no-save >/dev/null 2>&1)
+    (cd "$NATIVE_BUILD_DIR" && $NPM init -y 2>&1 | tail -2)
+    # 装 @electron/rebuild — 错误不能屏蔽, 否则后续会 MODULE_NOT_FOUND
+    (cd "$NATIVE_BUILD_DIR" && $NPM install @electron/rebuild 2>&1 | tail -3)
+    if [ ! -x "$NATIVE_BUILD_DIR/node_modules/.bin/electron-rebuild" ]; then
+        err "@electron/rebuild 装上了但 binary 缺失, 用 npx 兜底"
+    fi
     # 装 better-sqlite3 源码 (用 --ignore-scripts 跳过 prebuilt install)
-    (cd "$NATIVE_BUILD_DIR" && $NPM install better-sqlite3@11.10.0 --no-save --ignore-scripts >/dev/null 2>&1)
+    (cd "$NATIVE_BUILD_DIR" && $NPM install better-sqlite3@11.10.0 --no-save --ignore-scripts 2>&1 | tail -2)
     # 复制源码到 WORK_DIR (asar 内需要)
     mkdir -p "$WORK_DIR/node_modules/better-sqlite3"
     cp -r "$NATIVE_BUILD_DIR/node_modules/better-sqlite3"/* "$WORK_DIR/node_modules/better-sqlite3/" 2>/dev/null || true
-    # Rebuild for Electron 43 (NMV 148)
-    (cd "$NATIVE_BUILD_DIR" && node node_modules/.bin/electron-rebuild \
-      -v 43.1.0 -e "$ELEC43_DIR" -f -w better-sqlite3 2>&1 | tail -3)
+    # Rebuild for Electron 43 (NMV 148) — 不用 | tail -3, 失败要看真错误
+    set +e
+    if [ -x "$NATIVE_BUILD_DIR/node_modules/.bin/electron-rebuild" ]; then
+        (cd "$NATIVE_BUILD_DIR" && node node_modules/.bin/electron-rebuild \
+          -v 43.1.0 -e "$ELEC43_DIR" -f -w better-sqlite3)
+    else
+        # 用 npx 兜底 (会先 install @electron/rebuild, 再执行)
+        (cd "$NATIVE_BUILD_DIR" && npx --yes @electron/rebuild \
+          -v 43.1.0 -e "$ELEC43_DIR" -f -w better-sqlite3)
+    fi
+    RC=$?
+    set -e
+    if [ $RC -ne 0 ]; then
+      err "electron-rebuild 失败 rc=$RC, 不继续 (会 cp 失败)"
+      return 1
+    fi
     # 复制 rebuild 后的 .node 到 WORK_DIR
     mkdir -p "$WORK_DIR/node_modules/better-sqlite3/build/Release"
     cp "$NATIVE_BUILD_DIR/node_modules/better-sqlite3/build/Release/better_sqlite3.node" \

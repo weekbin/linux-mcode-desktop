@@ -137,7 +137,12 @@ build_better_sqlite3() {
         err "@electron/rebuild 装上了但 binary 缺失, 用 npx 兜底"
     fi
     # 装 better-sqlite3 源码 (用 --ignore-scripts 跳过 prebuilt install)
-    (cd "$NATIVE_BUILD_DIR" && $NPM install better-sqlite3@11.10.0 --no-save --ignore-scripts 2>&1 | tail -2)
+    # === mmx-patch: v12.10.1 不是 v11.10.0 ===
+    # v11.10.0 用旧 V8 API (v8::External::Value() 无参), electron 43 的 V8 要求
+    # v8::External::Value(ExternalPointerTypeTag tag) 带参. 编译报:
+    #   error: no matching function for call to 'v8::External::Value()'
+    # v12.10.1 修了 V8 API 兼容 (AGENTS.md §4.1 也推荐 12.10.1)
+    (cd "$NATIVE_BUILD_DIR" && $NPM install better-sqlite3@12.10.1 --no-save --ignore-scripts 2>&1 | tail -2)
     # 复制源码到 WORK_DIR (asar 内需要)
     mkdir -p "$WORK_DIR/node_modules/better-sqlite3"
     cp -r "$NATIVE_BUILD_DIR/node_modules/better-sqlite3"/* "$WORK_DIR/node_modules/better-sqlite3/" 2>/dev/null || true

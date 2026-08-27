@@ -93,7 +93,10 @@ ensure_unpacked() {
 extract_asar() {
   log "解 asar → $WORK_DIR ..."
   rm -rf "$WORK_DIR"
-  "$ASAR_TOOL" extract "$APP_ASAR_BAK" "$WORK_DIR"
+  # === mmx-patch: || true 因为 asar 4.3.0/3.2.10 在含 SHA256 + 缺失 asar.unpacked 条目的 asar
+  # 上会报 ENOENT (e.g. pi-tui win32-arm64 .node), 但实际 44K 文件全部抽出。
+  # 这是 @electron/asar 已知 bug, 见 docs/PIPELINE.md §6.1
+  "$ASAR_TOOL" extract "$APP_ASAR_BAK" "$WORK_DIR" || true
   log "✓ asar 解包 ($(find $WORK_DIR -type f | wc -l) 个文件)"
 }
 

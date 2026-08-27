@@ -29,7 +29,17 @@ DESCRIPTION="MiniMax Code Linux GUI client (built from Windows NSIS via @mmx-age
 # 源文件
 ELEC43_SRC="${ELEC43_DIR:-/home/weekbin/Works/repositories/orca/node_modules/.pnpm/electron@43.1.0/node_modules/electron}"
 APP_ASAR_SRC="$PROJECT_ROOT/unpacked/app-64"
+# === mmx-patch: icon fallback chain (Windows NSIS ships .ico only) ===
+# Build flow: 1) icon.png (extracted from icon.ico by scripts/build-in-container.sh)
+#             2) icon.ico (256x256 with embedded PNG, file fallback)
+#             3) icon.icns (macOS, used as last resort with 'convert')
 ICON_PNG_SRC="$PROJECT_ROOT/unpacked/app-64/resources/resources/icon.png"
+if [ ! -f "$ICON_PNG_SRC" ]; then
+    ICON_PNG_SRC="$PROJECT_ROOT/unpacked/app-64/resources/resources/icon.ico"
+fi
+if [ ! -f "$ICON_PNG_SRC" ]; then
+    ICON_PNG_SRC="$PROJECT_ROOT/unpacked/app-64/resources/resources/icon.icns"
+fi
 
 # 检查依赖
 if [ ! -x "$ELEC43_SRC/dist/electron" ]; then

@@ -46,3 +46,6 @@ Thumbs.db
 .env
 .env.local
 .test-logs/
+
+# Project-specific input/working dirs (this repo's convention, never commit)
+inputs/

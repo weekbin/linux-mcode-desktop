@@ -44,6 +44,7 @@ tools/test-ubuntu.sh 24.04
 
 ## 文档
 
+- **[docs/PIPELINE.md](./docs/PIPELINE.md)** — 完整 exe→deb 端到端流程（Mac/Ubuntu side-by-side, input/output 约定, 已知坑）
 - **[AGENTS.md](./AGENTS.md)** — 给 AI agent 看的：架构、脚本职责、troubleshooting、已知问题
 - **[tools/test-ubuntu.sh](./tools/test-ubuntu.sh)** — 跨 Ubuntu 版本自动冒烟测试
 - **[scripts/](./scripts/)** — 6 个 bash 脚本，从 NSIS 到 .deb 全流程

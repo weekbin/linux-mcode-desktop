@@ -22,6 +22,8 @@ linux-mcode-desktop/
 │   ├── libmmmx-shim.map     # linker version script
 │   ├── build-shim.sh        # 编译 shim
 │   └── better-sqlite3-binding.gyp.patch  # 给 better-sqlite3 加 -lmmmx 的 patch
+├── docs/
+│   └── PIPELINE.md          # 完整 exe→deb 流程 (Mac/Ubuntu side-by-side, input/output 约定, 已知坑)
 ├── README.md
 ├── AGENTS.md                # 你正在读
 └── .gitignore
@@ -316,11 +318,12 @@ grep -E 'better_sqlite3|libmmmx|libm' /tmp/strace.log | head -20
 
 1. **读 `AGENTS.md` (本文件)** — 架构、脚本职责、troubleshooting
 2. **读 `README.md`** — 用户视角的快速上手
-3. **看 `dist/` 是否存在** — 如果有 .deb，**不要 re-build**，直接拿去装测
-4. **如果用户报新 bug** — 优先看 `~/.config/MiniMax-Code/logs/main.log` 和 `journalctl -xe`
-5. **如果改 build 脚本** — 改完跑 `build-all.sh` 一次冒烟，再用 noble 容器端到端验
-6. **如果升级 electron 版本** — 必须重新跑 `build-linux-gui.sh` + `build-deb.sh`，asar 要重 pack
-7. **如果升级 @mmx-agent/electron 版本** — 看 `pi-ai` / `pi-tui` 的 export 变化，可能要重新调整版本对齐
+3. **读 `docs/PIPELINE.md`** — 完整 exe→deb 流程 + Mac/Ubuntu 差异 + input/output 约定 + 已知坑
+4. **看 `dist/` 是否存在** — 如果有 .deb，**不要 re-build**，直接拿去装测
+5. **如果用户报新 bug** — 优先看 `~/.config/MiniMax-Code/logs/main.log` 和 `journalctl -xe`
+6. **如果改 build 脚本** — 改完跑 `build-all.sh` 一次冒烟，再用 noble 容器端到端验
+7. **如果升级 electron 版本** — 必须重新跑 `build-linux-gui.sh` + `build-deb.sh`，asar 要重 pack
+8. **如果升级 @mmx-agent/electron 版本** — 看 `pi-ai` / `pi-tui` 的 export 变化，可能要重新调整版本对齐
 
 ---
 

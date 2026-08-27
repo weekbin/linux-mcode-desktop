@@ -133,32 +133,39 @@ apt-get install -y --no-install-recommends libcairo2 libpango-1.0-0 libpangocair
 # 2) 装 deb
 echo '--- 装 deb ---'
 dpkg -i /tmp/minimax.deb 2>&1 | tail -8
-# 3) 验证装好
-dpkg -s minimax-code 2>/dev/null | grep -E '^(Package|Status|Version):' | head -3
-# 4) 跑 electron (Xvfb)
-echo '--- 启动 electron ---'
+INSTALL_OK=\$(dpkg -s minimax-code 2>/dev/null | grep -c 'install ok installed')
+echo \"install_ok=\$INSTALL_OK\"
+# 3) 跑 electron (Xvfb, 60s 给 GLIBC 错误充分暴露)
+echo '--- 启动 electron (60s timeout) ---'
 mkdir -p /root/.config/MiniMax-Code
 Xvfb :99 -screen 0 1280x800x24 >/dev/null 2>&1 &
 XVFB_PID=\$!
 sleep 2
 export DISPLAY=:99
-timeout 25 /opt/MiniMax\ Code/run.sh > /tmp/mmx.log 2>&1
+timeout 60 /opt/MiniMax\ Code/run.sh > /tmp/mmx.log 2>&1
 RC=\$?
 kill \$XVFB_PID 2>/dev/null
 echo \"exit=\$RC\"
 echo '--- 关键 log ---'
-grep -E 'LocalRuntimeUtility|GLIBC|fmod|Cannot find package|login|MiniMax Code' /tmp/mmx.log | head -10
+grep -E 'LocalRuntimeUtility|GLIBC|fmod|Cannot find package|login|WindowManager|MiniMax Code' /tmp/mmx.log | head -10
 " 2>&1 | tee "$log"
     
-    # 5) 评估结果
-    if grep -qE 'LocalRuntimeUtility.*runtime started|WindowManager.*Registered window' "$log" 2>/dev/null; then
-        actual="PASS"
-    elif grep -qE 'GLIBC_2.38.*not found' "$log" 2>/dev/null; then
+    # 5) 评估结果 (双 marker: install + runtime)
+    if [ ! -f "$log" ]; then
+        actual="NO_LOG"
+    elif ! grep -qE 'install ok installed' "$log" 2>/dev/null; then
+        actual="INSTALL_FAIL"
+    elif grep -qE 'GLIBC_2.38.*not found|version `GLIBC_' "$log" 2>/dev/null; then
         actual="GLIBC_ERROR"
-    elif grep -qE 'Cannot find package' "$log" 2>/dev/null; then
+    elif grep -qE 'Cannot find package.*@earendil' "$log" 2>/dev/null; then
         actual="MISSING_PKG"
+    elif grep -qE 'LocalRuntimeUtility.*runtime (started|ready)' "$log" 2>/dev/null; then
+        actual="RUNTIME_PASS"
+    elif grep -qE 'WindowManager.*Registered window' "$log" 2>/dev/null; then
+        # 窗口注册了但 LocalRuntimeUtility 没起来 (60s 内)
+        actual="STARTUP_PARTIAL"
     else
-        actual="UNKNOWN"
+        actual="STARTUP_FAIL"
     fi
     
     if [ "$actual" = "$expected" ]; then

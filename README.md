@@ -59,10 +59,10 @@ tools/test-real-machine.sh
 
 | Bug | 报告说 | 实际 | 状态 |
 |-----|--------|------|------|
-| 1. OAuth scheme 不匹配 (`minimax-code` vs `minimax-cn`) | web 用 `minimax-code://` 唤不回 | asar 里 PROTOCOL_NAME 是**动态**的 (zh→`minimax-cn`, en→`minimax`, 还有 `-test`/`-staging`)。asar 代码里**没** `minimax-code` scheme。.desktop 当前写 `minimax-cn` (zh 正确)。 | ⏸ **待确认** (要 web 端实际 callback URI 列表) |
-| 2. Exec 路径空格未引号 | `Exec=/opt/MiniMax Code/run.sh %u` 启动失败 | `build-deb.sh:242` 已写 `Exec="/opt/MiniMax Code/run.sh" %u` | ✅ **已修** |
-| 3. StartupWMClass 写错 (`MiniMax Code` vs `mmx-agent-electron`) | dock 显示齿轮 | asar `package.json` `productName=undefined`, `name="@mmx-agent/electron"` → electron WMClass 实际是 `mmx-agent-electron`。原 `.desktop` 写 `MiniMax Code` 永不匹配。 | ✅ **已修** (`build-deb.sh:249` + `install-protocol-handler.sh:94` 改 `mmx-agent-electron`) |
-| 4. `install-protocol-handler.sh` 硬编码 `ELEC_BIN` 路径 | 写死 `/home/weekbin/...` 别人跑不了 | 已用 `BASH_SOURCE` 自定位，找 `<repo>/electron/dist/electron` 或 `ELEC43_DIR` 覆盖 | ✅ **已修** |
+| 1. OAuth scheme 不匹配 | web 用 `minimax-code://` 唤不回 | asar PROTOCOL_NAME 动态 6 种 (en/zh × prod/test/staging)。原 `.desktop` 只写 `minimax-cn` → en/test/staging 用户唤不回 | ✅ **已修** (`.desktop` MimeType 写全部 6 种, `xdg-mime default` 全部 6 个) |
+| 2. Exec 路径空格未引号 | `Exec=/opt/MiniMax Code/run.sh %u` 启动失败 | `build-deb.sh` 已写 `Exec="/opt/MiniMax Code/run.sh" %u` | ✅ **已修** |
+| 3. StartupWMClass 写错 (`MiniMax Code` vs `mmx-agent-electron`) | dock 显示齿轮 | asar `package.json` `name="@mmx-agent/electron"`, `productName=undefined` → 实际 WMClass 是 `mmx-agent-electron` | ✅ **已修** |
+| 4. `install-protocol-handler.sh` 硬编码 `ELEC_BIN` 路径 | 写死 `/home/weekbin/...` 别人跑不了 | 用 `BASH_SOURCE` 自定位，找 `<repo>/electron/dist/electron` 或 `ELEC43_DIR` 覆盖 | ✅ **已修** |
 
 ## 文档
 

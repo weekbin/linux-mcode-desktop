@@ -343,14 +343,27 @@ docker rm -f mmxtest-noble-12345
 
 ### 🟡 P1: OAuth scheme 不确定 (`minimax-cn` vs `minimax-code`)
 
-**问题**：asar 里 `getProtocolNameByEnv()` 动态返回 6 种 scheme：
+**问题**: asar `getProtocolNameByEnv()` 动态返回 6 种 scheme:
 `minimax` / `minimax-cn` / `minimax-test` / `minimax-cn-test` / `minimax-staging` / `minimax-cn-staging`
 
-当前 deb `.desktop` 写死 `x-scheme-handler/minimax-cn` (zh 线上版)。如果用户实际是 en 或 test/staging 环境，OAuth callback 唤不回。
+asar `parse.js` 正则 `^minimax(?:-cn)?(?:-test|-staging)?:$` 也接受全部 6 种。
 
-**外部 bug 报告**说 web 用 `minimax-code://`，但 asar 代码里**没**这个 scheme — 报告人可能是把 desktop 文件名跟 scheme 搞混了。
+外部 bug 报告说 web 用 `minimax-code://`, asar 跟 web 后端**都没**这个 scheme — 报告人大概率把 `minimax-code.desktop` 文件名跟 scheme 前缀搞混了.
 
-**待确认**：要 web 端实际 OAuth `redirect_uri` 列表才能下结论。
+**修法** (✅ 已修, commit `35cc206`):
+- `.desktop` `MimeType` 写全部 6 种 (en/zh × prod/test/staging)
+- postinst `xdg-mime default` 对全部 6 个 scheme 都设 default
+- 不需要改 asar (支持 6 种已经是对的), 只让 Linux desktop 端跟 asar 一致
+
+**验证** (用户机器 zh 线上 + 跑 fix 后):
+```
+x-scheme-handler/minimax → minimax-linux.desktop ✓
+x-scheme-handler/minimax-cn → minimax-linux.desktop ✓
+x-scheme-handler/minimax-test → minimax-linux.desktop ✓
+x-scheme-handler/minimax-cn-test → minimax-linux.desktop ✓
+x-scheme-handler/minimax-staging → minimax-linux.desktop ✓
+x-scheme-handler/minimax-cn-staging → minimax-linux.desktop ✓
+```
 
 ### 🟡 P1: asar 4.3.0 extract 工具 bug
 
@@ -372,6 +385,19 @@ docker rm -f mmxtest-noble-12345
 ---
 
 ## 7. Bug 修复日志 (按时间倒序)
+
+### 2026-08-28 — 修 Bug 1 (OAuth scheme, 6 种)
+
+**问题**: 外部用户报 web 用 `minimax-code://` 唤不回. 实查 asar `getProtocolNameByEnv()` 动态返回 6 种 scheme (en/zh × prod/test/staging), 但 `.desktop` MimeType 只写 `minimax-cn` → en/test/staging 用户全 100% 唤不回.
+
+**根因**: asar 跟 web 后端都是对的, 6 种都是合法 scheme. 问题在 Linux desktop 端没注册全. 报告人说的 `minimax-code://` 实际不存在 (他大概把 `minimax-code.desktop` 文件名跟 scheme 前缀混了).
+
+**修法** (commit `35cc206`):
+- `build-deb.sh` `.desktop` MimeType → 全 6 种
+- `build-deb.sh` postinst `xdg-mime default` 循环 6 个 scheme
+- `install-protocol-handler.sh` MimeType → 全 6 种
+
+**验证**: 用户机器 6/6 scheme 全部 default 到 `minimax-linux.desktop` ✓
 
 ### 2026-08-28 — 修 Bug 3 (StartupWMClass)
 

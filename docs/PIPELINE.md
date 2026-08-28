@@ -715,20 +715,35 @@ Exit 0 = all versions match expected. Exit 1 = unexpected outcome
 
 外部用户报 4 个 desktop 集成 bug, 排查结果:
 
-### Bug 1 — OAuth scheme mismatch (待确认)
+### Bug 1 — OAuth scheme mismatch (✅ 已修)
 
 **报告**: web 端 OAuth callback 用 `minimax-code://`, 但 `.desktop` 注册 `x-scheme-handler/minimax-cn`, 唤不回客户端。
 
-**实际**: asar 里 `getProtocolNameByEnv()` 动态返回 6 种 scheme:
-```
-zh:  minimax-cn / minimax-cn-test / minimax-cn-staging
-en:  minimax / minimax-test / minimax-staging
-```
-asar 代码里**没** `minimax-code` 这个 scheme. 当前 deb `.desktop` 写 `minimax-cn` (zh 线上) — 对 zh 用户正确。
+**实际** (从用户机器 asar 抽出确认):
+- `getProtocolNameByEnv()` 动态返回 6 种 scheme:
+  ```
+  zh:  minimax-cn / minimax-cn-test / minimax-cn-staging
+  en:  minimax / minimax-test / minimax-staging
+  ```
+- deeplink/parse.js 正则 `^minimax(?:-cn)?(?:-test|-staging)?:$` 也接受全部 6 种
+- asar 代码里**没** `minimax-code` 这个 scheme — 报告人**大概率**把 `minimax-code.desktop` 文件名跟 scheme 前缀混了
+- 原 `.desktop` 只写 `minimax-cn` (zh 线上) → en / test / staging 环境用户 100% 唤不回
 
-**结论**: 报告人**可能**把 desktop 文件名 (`minimax-code.desktop`) 跟 scheme 前缀 (`minimax-cn`) 搞混了。也可能 web 真换了 scheme。
+**修法** (commit `35cc206`):
+- `.desktop` MimeType 写全部 6 种 scheme
+- postinst `xdg-mime default` 循环 6 个都设
+- `install-protocol-handler.sh` MimeType 同样改 6 种
+- 不动 asar (支持 6 种已经对的)
 
-**状态**: ⏸ 待确认 web 实际 callback URI 列表后再修。
+**验证** (用户机器):
+```
+x-scheme-handler/minimax         → minimax-linux.desktop ✓
+x-scheme-handler/minimax-cn      → minimax-linux.desktop ✓
+x-scheme-handler/minimax-test    → minimax-linux.desktop ✓
+x-scheme-handler/minimax-cn-test → minimax-linux.desktop ✓
+x-scheme-handler/minimax-staging → minimax-linux.desktop ✓
+x-scheme-handler/minimax-cn-staging → minimax-linux.desktop ✓
+```
 
 ### Bug 2 — Exec 路径空格未引号 (✅ 已修)
 

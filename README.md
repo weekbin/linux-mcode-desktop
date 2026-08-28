@@ -81,51 +81,7 @@ tools/test-real-machine.sh
 
 ---
 
-## Ubuntu 版本支持矩阵 (Aug 2026)
-
-| 版本 | 代号 | GLIBC | gcc | libstdc++ | 装 deb | 真机 runtime | 备注 |
-|------|------|-------|-----|-----------|--------|--------------|------|
-| **26.04 LTS** | resolute | 2.43+ | 15 | recent | ✅ | ✅ | Resolute Raccoon，最新 LTS，全功能 |
-| **24.04 LTS** | noble | 2.39 | 13/14 | recent | ✅ | ✅ | Noble Numbat，**主要验证平台** |
-| 25.10 | questing | 2.41 | 14 | recent | ✅ | ✅ | 短支持周期 (9 月 EOL)，不推荐生产 |
-| 25.04 | plucky | 2.41 | 14 | recent | ✅ | ✅ | 已 EOL, 仅供参考 |
-| **22.04 LTS** | jammy | 2.35 | 11 | libstdc++.6.0.30 | ✅ | ⚠️ | 需 libmmmx.so 真机验证 (见 `AGENTS.md §6` P0) |
-| **20.04 LTS** | focal | 2.31 | 9/10 | libstdc++.6.0.28 | ✅ | ❌ | GLIBC 太老, better_sqlite3 加载失败 (post-OAuth) |
-
-**Legend**: ✅ 完全支持  ⚠️ 装可，runtime 需额外步骤  ❌ 不支持
-
-> 注: docker 冒烟测试所有版本都是 PASS (装包+启动到 login)，真机测才暴露 GLIBC 问题。
-> 矩阵由 `tools/lib/matrix.json` 单源维护。
-
-### 关键依赖 (按版本)
-
-| 包 | 20.04 | 22.04 | 24.04+ |
-|----|-------|-------|--------|
-| libnss3 / libnspr4 | ✅ | ✅ | ✅ |
-| libdrm2 (>= 2.4.109) | 2.4.107 ❌ | 2.4.114 ✅ | ✅ |
-| libnotify4 (>= 0.8.0) | 0.7.9 ❌ | ✅ | ✅ |
-| libatk1.0-0 (>= 2.36) | 2.35.1 ❌ | ✅ | ✅ |
-| libgtk-3-0 | ✅ | (t64 优先) | (t64 优先) |
-| libasound2 / libasound2t64 | `libasound2` | `libasound2t64` | `libasound2t64` |
-
-> preinst 用 `apt-get install -f -y` 解决 version mismatch，包名 alternates 写在 `Depends` 里。
-
----
-
-## 已知 Bug 状态 (从外部 bug 报告排查)
-
-| Bug | 报告说 | 实际 | 状态 |
-|-----|--------|------|------|
-| 1. OAuth scheme 不匹配 | web 用 `minimax-code://` 唤不回 | asar PROTOCOL_NAME 动态 6 种 (en/zh × prod/test/staging)。原 `.desktop` 只写 `minimax-cn` → en/test/staging 用户唤不回 | ✅ **已修** (`.desktop` MimeType 写全部 6 种) |
-| 2. Exec 路径空格未引号 | `Exec=/opt/MiniMax Code/run.sh %u` 启动失败 | `build-deb.sh` 已写 `Exec="/opt/MiniMax Code/run.sh" %u` | ✅ **已修** |
-| 3. StartupWMClass 写错 (`MiniMax Code` vs `mmx-agent-electron`) | dock 显示齿轮 | asar `package.json` `name="@mmx-agent/electron"`, `productName=undefined` → 实际 WMClass 是 `mmx-agent-electron` | ✅ **已修** |
-| 4. `install-protocol-handler.sh` 硬编码 `ELEC_BIN` 路径 | 写死 `/home/weekbin/...` 别人跑不了 | 用 `BASH_SOURCE` 自定位，找 `<repo>/electron/dist/electron` 或 `ELEC43_DIR` 覆盖 | ✅ **已修** |
-
-详细修复日志见 `AGENTS.md §7`。
-
----
-
-## 仓库结构
+## 仓库结构 (目录一览)
 
 ```
 linux-mcode-desktop/
@@ -145,6 +101,147 @@ linux-mcode-desktop/
 ├── AGENTS.md                AI agent 看: 架构 / troubleshooting / bug log
 └── package.json             npm run build:deb 等脚本
 ```
+
+### 文件职责速查 (file → purpose)
+
+| 路径 | 作用 |
+|---|---|
+| `inputs/MiniMax-Code-Setup-3.0.67-inside.44.exe` | Windows NSIS 安装包 (gitignored,目录和 README 保留) |
+| `unpacked/app-64/resources/app.asar` | Patch 后的 asar (424 MB) |
+| `unpacked/app-64/resources/app.asar.unpacked/` | Linux native binding 注入位置 |
+| `scripts/build-linux-gui.sh` | Stage A+B 驱动: NSIS 解包 → asar 抽 → 注入 Linux native → patch JS → repack |
+| `scripts/build-in-container.sh` | 在 macOS 上跑全 Linux pipeline (Docker Desktop + qemu amd64) |
+| `scripts/build-deb.sh` | Stage C 驱动: 把 unpacked/ + native + shim 打成 .deb |
+| `scripts/build-targz.sh` | 打包 .tar.gz (免 root 部署) |
+| `scripts/build-all.sh` | 一键跑 build-linux-gui + build-deb + build-targz |
+| `scripts/install-protocol-handler.sh` | Dev 模式注册 `minimax[-cn]://` OAuth callback (`BASH_SOURCE` 自定位) |
+| `scripts/run-mmx-linux.sh` | 装好后启动客户端 (含 `LD_PRELOAD` shim) |
+| `src/libmmmx-shim.c` | fmod@GLIBC_2.38 兼容实现 (jammy/focal 必需) |
+| `src/libmmmx-shim.map` | linker version script (限制只能暴露 fmod) |
+| `src/build-shim.sh` | 编译 libmmmx.so |
+| `src/better-sqlite3-binding.gyp.patch` | 给 better-sqlite3 加 `-lmmmx` 链接选项 |
+| `lib/libfmod_shim.so` | 预编译的 fmod shim fallback (committed,14KB) |
+| `tools/test-ubuntu.sh` | 路径 B: 跨版本 docker headless 冒烟 (CI / 日常) |
+| `tools/test-real-machine.sh` | 路径 A: 真机/桌面 runtime 验证 (OAuth + state.db) |
+| `tools/lib/matrix.json` | 版本支持矩阵**单源数据** (glibc / gcc / 预期 / reason) |
+| `tools/lib/matrix.sh` | bash 接口: `matrix_codename` / `matrix_image` / `matrix_expected` |
+| `tools/lib/parse-log.sh` | log → status token: `parse_log_status <log> <scope>` |
+| `docs/PIPELINE.md` | 完整端到端流程 (800+ 行,9 章节,Mac/Ubuntu side-by-side) |
+| `AGENTS.md` | AI agent 看: 架构 / 脚本职责 / troubleshooting / bug log (9 章节) |
+| `README-LINUX.md` | End-user 安装指南 (zh) |
+
+---
+
+## exe → deb 完整思路 (代码级)
+
+把上节"通俗版原理 4 步"对应到具体脚本和文件:
+
+```
+┌─ Stage A: NSIS 解包 + asar 重打包 (scripts/build-linux-gui.sh)
+│
+│  1. NSIS 自解压 (7z x inputs/*.exe → unpacked/app-64/)
+│     ├─ 删 Windows-only 资源: *.dll, *.bin, MiniMax Code.exe
+│     └─ 替换为 Linux Electron 43 binary (从 ELEC43_DIR/dist/electron 复制)
+│
+│  2. @electron/asar 解开 app.asar → /tmp/mmx-app-v3/
+│     ├─ 注入 4 个 Linux native binding (替换 Windows .node):
+│     │   - better-sqlite3 v12.10.1 (从 source rebuild,GLIBC 匹配目标)
+│     │   - node-pty v1.0.0 (同上)
+│     │   - @nut-tree/libnut-linux-x64 (N-API,直接用 prebuilt)
+│     │   - @vscode/ripgrep-linux-x64 (static-pie,直接用 prebuilt)
+│     ├─ Patch JS (GPU disable / open-external / tray / deeplink / mcode-tools)
+│     └─ asar 重打包 → unpacked/app-64/resources/app.asar (424MB)
+│
+│  3. Patch better-sqlite3 链接 (src/better-sqlite3-binding.gyp.patch)
+│     └─ ldflags 加 -Wl,-rpath -L /opt/mmx-shared -lmmmx
+│        → better_sqlite3.node 链接时把 fmod symbol 绑到 libmmmx
+│        → 避开 LD_PRELOAD 被 chromium sandbox 屏蔽的问题
+│
+├─ Stage B: native binding rebuild (在 Ubuntu 容器内)
+│  └─ scripts/build-in-container.sh --tag=24.04 拉 ubuntu:24.04 容器
+│     ├─ 装 build 工具链 (g++-13 / clang / node 22)
+│     ├─ npm install better-sqlite3@12.10.1 + node-pty (--ignore-scripts)
+│     ├─ 隐藏 prebuilds 目录强迫 source build
+│     └─ node node-gyp.js rebuild --target=43.1.0 --runtime=electron
+│        (命令行参数,不是环境变量 — node-gyp 不读 npm_config_*)
+│
+├─ Stage C: 打 .deb (scripts/build-deb.sh)
+│  ├─ 重组目录结构到 /opt/MiniMax Code/
+│  ├─ 注入 4 个 .node 到 app.asar.unpacked/
+│  ├─ 注入 libmmmx.so → /opt/mmx-shared/libmmmx.so
+│  ├─ 写 /usr/share/applications/minimax-code.desktop
+│  │   - Name=MiniMax Code (展示名)
+│  │   - StartupWMClass=MiniMax (跟 Electron 实际 WMClass 对齐)
+│  │   - MimeType=x-scheme-handler/minimax;minimax-cn;...
+│  ├─ 写 DEBIAN/{preinst,postinst,prerm,conffiles}
+│  │   - preinst: 只 detect 依赖,提示用户,不抢 apt 锁
+│  │   - postinst: 真装依赖 (只缺才 apt-get update + install)
+│  └─ dpkg-deb --build → dist/minimax-code_3.0.67-inside.44_amd64.deb (~227MB)
+│
+├─ Stage D: 双路径验证
+│  ├─ 路径 A (CI / 日常): tools/test-ubuntu.sh 24.04 26.04
+│  │   └─ 拉 ubuntu:TAG 容器, 装 deb, Xvfb 启动, 验 WindowManager login registered
+│  │      判定: scope=docker, 矩阵在 matrix.json:expected_docker
+│  └─ 路径 B (release 前): tools/test-real-machine.sh
+│      └─ 真机/桌面跑, 验 OAuth + LocalRuntime ready + state.db 创建
+│         判定: scope=realmachine, 矩阵在 matrix.json:expected_realmachine
+└─ Done
+```
+
+**关键设计决策** (这些就是"为什么折腾这么久"的根因):
+
+1. **每个 deb 在对应 Ubuntu 容器内独立 rebuild** — GLIBC 不向上兼容,高 GLIBC 编译的 .node 在低 GLIBC 系统跑不起来
+2. **node-gyp 必须 `--target --runtime` 命令行参数** — 环境变量 `npm_config_target=43.1.0` 被 node-gyp 忽略
+3. **better-sqlite3 v12.10.1 需要完整 c++20** — g++-10/11 不支持 `<source_location>`,必须 g++-12+ / Clang 15+
+4. **fmod shim 链接进 .node 而非 LD_PRELOAD** — chromium sandbox 屏蔽 LD_PRELOAD 传给子进程,链接进 .node 走 rpath 一劳永逸
+5. **preinst 只 detect 不 install** — 抢 apt 锁会导致 dpkg 卡 30s+,真装依赖放 postinst
+6. **.desktop StartupWMClass 跟 Electron 实际 WMClass 对齐** — 来自 `app.setName(APP_NAME)`,不来自 `package.json.name`
+
+---
+
+## 支持情况总览
+
+**Ubuntu 版本** (单源数据 `tools/lib/matrix.json`):
+
+| 版本 | 代号 | GLIBC | gcc | 装 deb | 真机 runtime | 备注 |
+|---|---|---|---|---|---|---|
+| **26.04 LTS** | resolute | 2.43+ | 15 | ✅ | ✅ | Resolute Raccoon,最新 LTS,全功能 |
+| **24.04 LTS** | noble | 2.39 | 13/14 | ✅ | ✅ | Noble Numbat,**主要验证平台** |
+| 25.10 | questing | 2.41 | 14 | ✅ | ✅ | 短支持周期 (9 月 EOL),不推荐生产 |
+| 25.04 | plucky | 2.41 | 14 | ✅ | ✅ | 已 EOL,仅供参考 |
+| **22.04 LTS** | jammy | 2.35 | 11 | ✅ | ⚠️ | 需 libmmmx.so 真机验证 (见 `AGENTS.md §6` P0) |
+| **20.04 LTS** | focal | 2.31 | 9/10 | ✅ | ❌ | GLIBC 太老,better_sqlite3 加载失败 (post-OAuth) |
+
+**Legend**: ✅ 完全支持  ⚠️ 装可,runtime 需额外步骤  ❌ 不支持
+
+> docker 冒烟所有版本都是 PASS (装包+启动到 login),真机测才暴露 GLIBC 问题。
+
+**关键依赖** (按版本差异,完整表见 [docs/PIPELINE.md §4](../docs/PIPELINE.md)):
+
+| 包 | 20.04 | 22.04 | 24.04+ |
+|---|---|---|---|
+| libdrm2 (>= 2.4.109) | 2.4.107 ❌ | 2.4.114 ✅ | ✅ |
+| libnotify4 (>= 0.8.0) | 0.7.9 ❌ | ✅ | ✅ |
+| libatk1.0-0 (>= 2.36) | 2.35.1 ❌ | ✅ | ✅ |
+| libgtk-3-0 | ✅ | (t64 优先) | (t64 优先) |
+| libasound2 / libasound2t64 | `libasound2` | `libasound2t64` | `libasound2t64` |
+
+> preinst 用 `apt-get install -f -y` 解决 version mismatch,包名 alternates 写在 `Depends` 里。
+
+**已知 Bug 状态** (Aug 2026,完整修复日志见 `AGENTS.md §7`):
+
+| Bug | 报告说 | 实际 | 状态 |
+|---|---|---|---|
+| 1. OAuth scheme 不匹配 | web 用 `minimax-code://` 唤不回 | asar `getProtocolNameByEnv()` 动态 6 种,`.desktop` 只写 `minimax-cn` | ✅ **已修** (`.desktop` MimeType 写全部 6 种) |
+| 2. Exec 路径空格未引号 | `Exec=/opt/MiniMax Code/run.sh %u` 启动失败 | 已加引号 | ✅ **已修** |
+| 3. StartupWMClass 写错 (`MiniMax Code` vs `mmx-agent-electron`) | dock 显示齿轮 | asar `package.json` 没 productName,实际 WMClass 是 `mmx-agent-electron` | ✅ **已修** (`.desktop` 改 `MiniMax`,匹配 `app.setName()`) |
+| 4. `install-protocol-handler.sh` 硬编码 `ELEC_BIN` 路径 | 写死别人跑不了 | `BASH_SOURCE` 自定位 | ✅ **已修** |
+
+**已知未解决问题** (按优先级,详见 `AGENTS.md §6`):
+
+- 🔴 **P0**: jammy/focal 真机 GLIBC 兼容 (libmmmx 已 link 进 .node,未端到端验证)
+- 🟡 **P1**: asar 4.3.0 extract 工具 bug (降级 3.2.10 解决)
+- 🟢 **P2**: build-deb.sh `find | xargs touch` 性能 (大 PKG_ROOT 慢 5+ 分钟)
 
 ---
 

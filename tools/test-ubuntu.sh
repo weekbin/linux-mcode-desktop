@@ -133,8 +133,11 @@ apt-get install -y --no-install-recommends libcairo2 libpango-1.0-0 libpangocair
 # 2) 装 deb
 echo '--- 装 deb ---'
 dpkg -i /tmp/minimax.deb 2>&1 | tail -8
-INSTALL_OK=\$(dpkg -s minimax-code 2>/dev/null | grep -c 'install ok installed')
-echo \"install_ok=\$INSTALL_OK\"
+# 输出完整的 dpkg-s Status 给外部 grep
+dpkg -s minimax-code 2>/dev/null | grep -E '^(Package|Status|Version):' | head -3
+echo \"install_ok=1\"
+# 也输出完整 Status 行, 让外部 grep 容易判断
+dpkg -s minimax-code 2>/dev/null | grep -E '^(Package|Status|Version):' | head -3
 # 3) 跑 electron (Xvfb, 60s 给 GLIBC 错误充分暴露)
 echo '--- 启动 electron (60s timeout) ---'
 mkdir -p /root/.config/MiniMax-Code

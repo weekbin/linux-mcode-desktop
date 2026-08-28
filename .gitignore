@@ -48,8 +48,8 @@ Thumbs.db
 .test-logs/
 
 # Project-specific input/working dirs (this repo's convention, never commit)
-inputs/
-# Keep inputs/README.md in repo so people know where to put the .exe
+# ignore all files inside inputs/ but keep inputs/README.md so people know where to put the .exe
+inputs/*
 !inputs/README.md
 
 # unpacked/ holds raw NSIS extraction (1.6 GB) — regenerated on every fresh build

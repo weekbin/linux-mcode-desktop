@@ -138,26 +138,36 @@ dpkg -s minimax-code 2>/dev/null | grep -E '^(Package|Status|Version):' | head -
 echo \"install_ok=1\"
 # 也输出完整 Status 行, 让外部 grep 容易判断
 dpkg -s minimax-code 2>/dev/null | grep -E '^(Package|Status|Version):' | head -3
-# 3) 跑 electron (Xvfb, 60s 给 GLIBC 错误充分暴露)
-echo '--- 启动 electron (60s timeout) ---'
+# 3) 跑 electron (Xvfb, 90s 给 LocalRuntimeUtility 充分时间)
+echo '--- 启动 electron (90s timeout) ---'
 mkdir -p /root/.config/MiniMax-Code
 Xvfb :99 -screen 0 1280x800x24 >/dev/null 2>&1 &
 XVFB_PID=\$!
 sleep 2
 export DISPLAY=:99
-timeout 60 /opt/MiniMax\ Code/run.sh > /tmp/mmx.log 2>&1
+timeout 90 /opt/MiniMax\ Code/run.sh > /tmp/mmx.log 2>&1
 RC=\$?
 kill \$XVFB_PID 2>/dev/null
 echo \"exit=\$RC\"
 echo '--- 关键 log ---'
 grep -E 'LocalRuntimeUtility|GLIBC|fmod|Cannot find package|login|WindowManager|MiniMax Code' /tmp/mmx.log | head -10
+echo '--- runtime 初始化检查 ---'
+# LocalRuntimeUtility 成功会创建 state.db (better-sqlite3 V2 migration)
+if [ -f /root/.config/MiniMax-Code/state.db ] || [ -f /root/.config/MiniMax-Code/local-runtime/state.db ]; then
+    echo 'state_db=ok'
+else
+    echo 'state_db=missing'
+fi
 " 2>&1 | tee "$log"
     
     # 5) 评估结果 (双 marker: install + runtime)
+    # PASS 判定: install ok + state.db 创建成功 (说明 LocalRuntimeUtility V2 migration 跑完)
     if [ ! -f "$log" ]; then
         actual="NO_LOG"
     elif ! grep -qE 'install ok installed' "$log" 2>/dev/null; then
         actual="INSTALL_FAIL"
+    elif grep -qE 'state_db=ok' "$log" 2>/dev/null; then
+        actual="RUNTIME_PASS"
     elif grep -qE 'GLIBC_2.38.*not found|version `GLIBC_' "$log" 2>/dev/null; then
         actual="GLIBC_ERROR"
     elif grep -qE 'Cannot find package.*@earendil' "$log" 2>/dev/null; then

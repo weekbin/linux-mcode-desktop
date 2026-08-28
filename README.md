@@ -6,6 +6,9 @@
 ## TL;DR
 
 ```bash
+# 0) 把 Windows NSIS 装到 inputs/  (gitignored, 留目录)
+cp /path/to/MiniMax-Code-Setup-3.0.67-inside.44.exe inputs/
+
 # 1) 准备 Linux Electron 43.1.0 (任意路径, 改 ELEC43_DIR)
 ELEC43_DIR=/path/to/electron-43 npm run build
 
@@ -71,6 +74,8 @@ tools/test-real-machine.sh
 - **[tools/test-ubuntu.sh](./tools/test-ubuntu.sh)** — docker headless 冒烟测试
 - **[tools/test-real-machine.sh](./tools/test-real-machine.sh)** — 真机/桌面 runtime 验证
 - **[tools/lib/](./tools/lib/)** — 共享工具 (matrix.json + matrix.sh + parse-log.sh)
+- **[lib/](./lib/)** — 预编译的 native shim (libfmod_shim.so, 14KB, 提供 fmod@GLIBC_2.38)
+- **[inputs/](./inputs/)** — 放 Windows .exe 的目录 (gitignored, README 留路径)
 - **[scripts/](./scripts/)** — 7 个 bash 脚本，从 NSIS 到 .deb 全流程 + protocol handler
 - **[src/](./src/)** — 关键 patch 源码（libmmmx shim + binding.gyp patch）
 

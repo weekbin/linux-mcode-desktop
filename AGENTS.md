@@ -10,18 +10,22 @@
 
 ```
 linux-mcode-desktop/
+├── inputs/                  # 用户放 .exe 的目录 (gitignored, README 留路径)
+│   └── README.md
 ├── scripts/
 │   ├── build-linux-gui.sh   # 核心: NSIS 解包 → asar 抽 → 注入 Linux native → patch JS → repack
 │   ├── build-deb.sh         # 把 unpacked/ 打成 .deb
 │   ├── build-targz.sh       # 打包 .tar.gz (可移植版本)
 │   ├── build-all.sh         # 编排: build-linux-gui + build-deb + build-targz
-│   ├── install-protocol-handler.sh  # 注册 minimax-cn:// OAuth callback
+│   ├── install-protocol-handler.sh  # dev 模式注册 minimax[-cn]:// OAuth callback
 │   └── run-mmx-linux.sh     # 装好后启动客户端
 ├── src/
 │   ├── libmmmx-shim.c       # 提供 fmod@GLIBC_2.38 的 shim
 │   ├── libmmmx-shim.map     # linker version script
 │   ├── build-shim.sh        # 编译 shim
 │   └── better-sqlite3-binding.gyp.patch  # 给 better-sqlite3 加 -lmmmx 的 patch
+├── lib/                     # 预编译的 native shim (committed, 14KB)
+│   └── libfmod_shim.so      # fmod@GLIBC_2.38 fallback, 让 fresh clone 不需要 gcc 也能 build-deb
 ├── tools/                   # 验证工具 (双路径)
 │   ├── test-ubuntu.sh       # 路径 B: docker headless 冒烟 (CI / 日常)
 │   ├── test-real-machine.sh # 路径 A: 真机/桌面 runtime 验证 (release 前必跑)
@@ -31,7 +35,11 @@ linux-mcode-desktop/
 │       └── parse-log.sh     # 从 log 抽 status: parse_log_status <log> <scope>
 ├── docs/
 │   └── PIPELINE.md          # 完整 exe→deb 流程 (Mac/Ubuntu side-by-side, input/output 约定, 已知坑)
+├── unpacked/                # NSIS 解包输出 (gitignored, 由 build-linux-gui.sh 生成)
+│   └── app-64/              #   ~1.6GB, 永远不 commit
+├── dist/                    # deb 产物 (gitignored, 由 build-deb.sh 生成)
 ├── README.md
+├── README-LINUX.md
 ├── AGENTS.md                # 你正在读
 └── .gitignore
 ```

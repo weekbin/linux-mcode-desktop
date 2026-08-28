@@ -544,28 +544,21 @@ exit code is non-zero, so scripts using `set -e` will abort; wrap in
 **Fix idea** (P1 in `AGENTS.md`): write a Python asar parser
 (`tools/extract_asar.py`) that ignores missing-asar-unpacked entries.
 
-### 6.2 `build-deb.sh:32` references nonexistent `icon.png`
+### 6.2 `build-deb.sh` 优先要 `icon.png`, 但 Windows NSIS 不带
 
 ```bash
 ICON_PNG_SRC="$PROJECT_ROOT/unpacked/app-64/resources/resources/icon.png"
+# 实际解包后通常只有 .ico (Win) / .icns (macOS), 没有 .png
+# build-deb.sh 现在有 fallback chain: icon.png → icon.ico → icon.icns
 ```
 
-But the Windows NSIS installer only ships `icon.icns` (macOS) and
-`icon.ico` (Windows) — **no `icon.png`**. The check
-`if [ ! -f "$ICON_PNG_SRC" ]` will fail.
+**修法** (✅ 已修): `build-deb.sh:36-42` 链式 fallback:
+1. 优先用 `unpacked/app-64/resources/resources/icon.png` (如已提取)
+2. 否则用 `unpacked/app-64/resources/resources/icon.ico` (NSIS 默认出, ImageMagick 能直接处理)
+3. 否则用 `unpacked/app-64/resources/resources/icon.icns` (macOS)
+4. 都没有就 exit 1
 
-**Workaround**: convert `icon.ico` → `icon.png` once after unpack:
-```bash
-# On Mac: brew install imagemagick
-convert 'unpacked/app-64/resources/resources/icon.ico[0]' \
-        unpacked/app-64/resources/resources/icon.png
-# Or use a single-frame .icns:
-# brew install icnsutils
-# pngpaste ... (more complex; .ico conversion is simpler)
-```
-
-**Fix idea** (P2 in `AGENTS.md`): make `build-deb.sh` fall back to
-`.ico` or generate a PNG from the `.icns` at build time.
+不依赖 pre-extracted `icon.png`, fresh clone 解包完就能直接 `build-deb.sh`。
 
 ### 6.3 Hardcoded paths in `build-linux-gui.sh:42-54`
 
@@ -682,7 +675,8 @@ Exit 0 = all versions match expected. Exit 1 = unexpected outcome
 
 | Path | Purpose |
 |------|---------|
-| `inputs/MiniMax-Code-Setup-3.0.67-inside.44.exe` | The Windows NSIS installer (gitignored) |
+| `inputs/MiniMax-Code-Setup-3.0.67-inside.44.exe` | The Windows NSIS installer (gitignored, **目录和 README 保留**) |
+| `inputs/README.md` | 告诉用户把 .exe 放哪 |
 | `unpacked/app-64/` | After NSIS unpack (gitignored) |
 | `unpacked/app-64/resources/app.asar` | Patched asar (424 MB) |
 | `unpacked/app-64/resources/app.asar.orig` | Original asar (461 MB, immutable) |

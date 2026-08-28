@@ -134,12 +134,12 @@ if [ ! -d /tmp/elec43/node_modules/electron ]; then
 fi
 
 echo "▶ build libmmmx shim (Mac clang 不认 .symver, 必须 Linux gcc)"
-mkdir -p /work/dist-lib
-if [ ! -f /work/dist-lib/libfmod_shim.so ]; then
-    gcc -shared -fPIC -nostdlib -o /work/dist-lib/libfmod_shim.so \
+mkdir -p /work/lib
+if [ ! -f /work/lib/libfmod_shim.so ]; then
+    gcc -shared -fPIC -nostdlib -o /work/lib/libfmod_shim.so \
         /work/src/libmmmx-shim.c -Wl,--version-script=/work/src/libmmmx-shim.map
 fi
-nm -D /work/dist-lib/libfmod_shim.so | grep fmod
+nm -D /work/lib/libfmod_shim.so | grep fmod
 
 echo "▶ Stage A + B: build-linux-gui.sh (asar extract + native rebuild)"
 export ELEC43_DIR=/tmp/elec43/node_modules/electron
@@ -205,10 +205,10 @@ fi
 echo "✓ electron binary: $(file $ELECTRON_DIST | cut -d: -f2)"
 
 echo "▶ build libmmmx shim (Mac clang 不认 .symver, 必须 Linux gcc)"
-mkdir -p /work/dist-lib
-gcc -shared -fPIC -nostdlib -o /work/dist-lib/libfmod_shim.so \
+mkdir -p /work/lib
+gcc -shared -fPIC -nostdlib -o /work/lib/libfmod_shim.so \
     /work/src/libmmmx-shim.c -Wl,--version-script=/work/src/libmmmx-shim.map
-nm -D /work/dist-lib/libfmod_shim.so | grep fmod
+nm -D /work/lib/libfmod_shim.so | grep fmod
 
 echo "▶ Stage A + B: build-linux-gui.sh (asar extract + native rebuild)"
 export ELEC43_DIR=/tmp/elec43/node_modules/electron

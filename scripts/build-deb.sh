@@ -130,7 +130,7 @@ fi
 # better-sqlite3 v12 rebuild 后会引用 fmod@GLIBC_2.38 (glibc 2.38 改了 fmod 实现)
 # focal (GLIBC 2.31) 和 jammy (GLIBC 2.35) 系统 libm 都没这个 versioned symbol
 # 装 shim 提供 fmod@GLIBC_2.38 (C99 简单实现), run.sh 会 LD_PRELOAD 它
-SHIM_SRC="$PROJECT_ROOT/dist-lib/libfmod_shim.so"
+SHIM_SRC="$PROJECT_ROOT/lib/libfmod_shim.so"
 if [ -f "$SHIM_SRC" ]; then
     cp -f "$SHIM_SRC" "$PKG_ROOT/opt/MiniMax Code/libfmod_shim.so"
     chmod 755 "$PKG_ROOT/opt/MiniMax Code/libfmod_shim.so"

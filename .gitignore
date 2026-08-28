@@ -49,16 +49,15 @@ Thumbs.db
 
 # Project-specific input/working dirs (this repo's convention, never commit)
 inputs/
+# Keep inputs/README.md in repo so people know where to put the .exe
+!inputs/README.md
 
 # unpacked/ holds raw NSIS extraction (1.6 GB) — regenerated on every fresh build
 unpacked/
-# mmx-patch: exception for icon.png (7KB, used by build-deb.sh). Without this,
-# a fresh clone would need to re-run NSIS unpack + icon extraction just to build.
-!unpacked/app-64/resources/resources/icon.png
 
-# mmx-patch: dist-lib/ holds libfmod_shim.so (GLIBC_2.38 fmod fallback, 14KB).
+# mmx-patch: lib/ holds libfmod_shim.so (GLIBC_2.38 fmod fallback, 14KB).
 # This is an intermediate build artifact that we DO commit so a fresh clone
 # can build-deb without re-running the shim compile (which needs Linux gcc + .symver).
 # Final .deb (dist/) is still ignored.
-!dist-lib/
-!dist-lib/libfmod_shim.so
+!lib/
+!lib/libfmod_shim.so

@@ -351,13 +351,19 @@ What it does:
 
 After Stage C, `dist/minimax-code_3.0.67-inside.44_amd64.deb` exists.
 
-### 3.5 End-to-end test (Linux only)
+### 3.5 End-to-end test (Linux only) — 双路径
 
 ```bash
-# Smoke test: install + launch in a clean Ubuntu 24.04 container
-tools/test-ubuntu.sh 24.04
+# 路径 B: docker headless 冒烟 (CI / 日常)
+# 验装包 + 启动到 login 窗口 + 无 GLIBC/missing-pkg 错
+# 注意: headless 跑不到 OAuth, state.db 永远看不到 (这是 design limitation, 不是 bug)
+tools/test-ubuntu.sh 24.04 26.04
 
-# Or manual:
+# 路径 A: 真机/桌面 runtime 验证 (release 前必跑, 要 GUI + OAuth 账号)
+# 验装包 + OAuth + LocalRuntime ready + state.db 创建
+tools/test-real-machine.sh
+
+# 或者手动:
 docker run -it --rm \
   -v $PWD/dist:/dist:ro \
   -v /tmp/.X11-unix:/tmp/.X11-unix -e DISPLAY \
@@ -368,15 +374,26 @@ apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
 dpkg -i /dist/minimax-code_3.0.67-inside.44_amd64.deb
 Xvfb :99 -screen 0 1280x800x24 &
 DISPLAY=:99 /opt/MiniMax\ Code/run.sh
-# Look for "[LocalRuntimeUtility] runtime started" in main.log
+# Look for "WindowManager Registered window: type=login" (headless 最高可达)
+# 真机还要看 "[LocalRuntimeUtility] runtime started" + state.db 创建
 ```
 
-Expected log markers (success):
+Expected log markers:
+
+**docker headless (PASS)**:
+```
+[info]  [WindowManager] Registered window: type=login, id=1
+```
+
+**真机 (RUNTIME_PASS)**:
 ```
 [info]  [LocalRuntime] Launch plan: buildEnv=prod
 [info]  [LocalRuntimeUtility] runtime started
 [info]  [WindowManager] Registered window: type=login, id=1
+# state.db 文件创建: ~/.config/MiniMax-Code/v2/sqlite/runtime-state.sqlite
 ```
+
+详见 `AGENTS.md §5` (双路径详细文档 + 判定标准)。
 
 ---
 
@@ -646,15 +663,18 @@ DEB_PATH=/path/to/deb tools/test-ubuntu.sh 24.04
 1. `docker run -it --rm ubuntu:24.04 ...`
 2. Install runtime deps (libnss3, libgbm1, etc.)
 3. `dpkg -i` the .deb
-4. Start Xvfb + the app
-5. Wait for the "LocalRuntimeUtility runtime started" log marker
-6. Compare to `EXPECTED[version]` map:
-   - 20.04 → `FAIL` (GLIBC too old)
-   - 22.04 → `PARTIAL` (shim link unverified)
-   - 24.04+ → `PASS`
+4. Start Xvfb + the app (180s timeout)
+5. Parse log via `tools/lib/parse-log.sh` (scope=docker)
+6. Compare to `tools/lib/matrix.json:expected_docker[<version>]`:
+   - 20.04/22.04/24.04/25.04/25.10/26.04 → `PASS` (装包+启动到 login)
+7. 真机验证 (OAuth + state.db) 走 `tools/test-real-machine.sh`
 
 Exit 0 = all versions match expected. Exit 1 = unexpected outcome
 (usually a new bug). Logs go to `.test-logs/<codename>.log`.
+
+> 注: 之前 24.04/26.04 报 `STARTUP_PARTIAL` 假阴性是因为用了 90s 等
+> `v2/sqlite/runtime-state.sqlite`, 但 headless 容器 OAuth 跑不到, 永远创建不出来.
+> 改判定后 6/6 都跟 matrix 预期一致 (见 commit `04bb2b1` + `fbebc33`).
 
 ---
 
@@ -675,11 +695,70 @@ Exit 0 = all versions match expected. Exit 1 = unexpected outcome
 | `scripts/build-deb.sh` | Stage C driver |
 | `scripts/build-targz.sh` | Optional tar.gz packaging |
 | `scripts/build-all.sh` | Runs all 3 above |
-| `scripts/install-protocol-handler.sh` | Registers `minimax-cn://` OAuth callback |
+| `scripts/install-protocol-handler.sh` | Dev 模式注册 `minimax-cn://` OAuth callback (BASH_SOURCE 自定位) |
 | `scripts/run-mmx-linux.sh` | `LD_PRELOAD` wrapper to launch the app |
 | `src/libmmmx-shim.c` | fmod@GLIBC_2.38 fallback (for jammy/focal) |
 | `src/better-sqlite3-binding.gyp.patch` | Adds `-lmmmx` to better-sqlite3 link |
-| `tools/test-ubuntu.sh` | Cross-version smoke test |
+| `tools/test-ubuntu.sh` | 路径 B: 跨版本 docker headless 冒烟 |
+| `tools/test-real-machine.sh` | 路径 A: 真机/桌面 runtime 验证 (OAuth + state.db) |
+| `tools/lib/matrix.json` | 版本支持矩阵单源数据 |
+| `tools/lib/matrix.sh` | bash 接口: matrix_codename / matrix_image / matrix_expected |
+| `tools/lib/parse-log.sh` | log → status token: `parse_log_status <log> <scope>` |
 | `README.md` | User-facing TL;DR |
-| `AGENTS.md` | AI-agent-focused architecture/troubleshooting |
+| `README-LINUX.md` | End-user install guide (Chinese) |
+| `AGENTS.md` | AI-agent-focused architecture/troubleshooting/bug log |
 | `docs/PIPELINE.md` | This file — full end-to-end record |
+
+---
+
+## 10. Desktop integration bugs (Aug 2026 排查)
+
+外部用户报 4 个 desktop 集成 bug, 排查结果:
+
+### Bug 1 — OAuth scheme mismatch (待确认)
+
+**报告**: web 端 OAuth callback 用 `minimax-code://`, 但 `.desktop` 注册 `x-scheme-handler/minimax-cn`, 唤不回客户端。
+
+**实际**: asar 里 `getProtocolNameByEnv()` 动态返回 6 种 scheme:
+```
+zh:  minimax-cn / minimax-cn-test / minimax-cn-staging
+en:  minimax / minimax-test / minimax-staging
+```
+asar 代码里**没** `minimax-code` 这个 scheme. 当前 deb `.desktop` 写 `minimax-cn` (zh 线上) — 对 zh 用户正确。
+
+**结论**: 报告人**可能**把 desktop 文件名 (`minimax-code.desktop`) 跟 scheme 前缀 (`minimax-cn`) 搞混了。也可能 web 真换了 scheme。
+
+**状态**: ⏸ 待确认 web 实际 callback URI 列表后再修。
+
+### Bug 2 — Exec 路径空格未引号 (✅ 已修)
+
+`build-deb.sh:242` 现在是 `Exec="/opt/MiniMax Code/run.sh" %u`。
+
+### Bug 3 — StartupWMClass 错 (✅ 已修)
+
+asar `package.json` `name="@mmx-agent/electron"` + `productName=undefined` → electron 实际 WMClass 是 `mmx-agent-electron`。
+原 `.desktop` 写 `MiniMax Code` 永不匹配 → dock 显示通用齿轮。
+
+**修法**: 改 `build-deb.sh:249` 和 `install-protocol-handler.sh:94` 的 `StartupWMClass=mmx-agent-electron`。
+
+**验证**: `xprop WM_CLASS` 返回 `mmx-agent-electron` (跟 `.desktop` 一致); GNOME dock 显示正确 logo。
+
+### Bug 4 — install-protocol-handler.sh 硬编码路径 (✅ 已修)
+
+原 `ELEC_BIN="${ELEC43_DIR:-/home/weekbin/Works/...}"` 写死开发机路径。
+
+**修法**: 用 `BASH_SOURCE` 自定位:
+```bash
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+if [ -n "${ELEC43_DIR:-}" ]; then
+    ELEC_BIN="$ELEC43_DIR/dist/electron"
+elif [ -x "$PROJECT_ROOT/electron/dist/electron" ]; then
+    ELEC_BIN="$PROJECT_ROOT/electron/dist/electron"
+else
+    echo "[ERROR] ..."
+    exit 1
+fi
+```
+
+详细修复日志见 `AGENTS.md §7`。

@@ -246,7 +246,7 @@ NoDisplay=false
 Categories=Development;
 MimeType=x-scheme-handler/minimax-cn;
 StartupNotify=true
-StartupWMClass=MiniMax Code
+StartupWMClass=mmx-agent-electron
 EOF
 
 # ===== 8) /usr/share/icons/hicolor/ — 多尺寸 PNG =====

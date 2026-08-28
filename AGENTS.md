@@ -318,17 +318,17 @@ docker rm -f mmxtest-noble-12345
 
 ## 6. 已知未解决问题（按优先级）
 
-### 🔴 P0: GLIBC 兼容性（多个 OS 不支持）
+### 🔴 P0: GLIBC 兼容性（20.04/22.04 真机）
 
 **问题**：
 - electron 43 chromium 内部用 GLIBC 2.38 symbols（`__libc_single_threaded`, `fmod` 等）
-- noble: GLIBC 2.39 ✅
-- jammy: GLIBC 2.35 ❌
-- focal: GLIBC 2.31 ❌
+- noble (24.04): GLIBC 2.39 ✅
+- jammy (22.04): GLIBC 2.35 ❌
+- focal (20.04): GLIBC 2.31 ❌
 
 **当前状态**：
 - shim 已写好（`src/libmmmx-shim.c`），link patch 准备好（`src/better-sqlite3-binding.gyp.patch`）
-- **未在 jammy/focal 容器端到端验证过 shim 链接后的 better_sqlite3.node 能否真的加载**
+- **未在 jammy/focal 真机端到端验证过 shim 链接后的 better_sqlite3.node 能否真的加载**
 - shim 通过 `LD_PRELOAD` 在 main process 工作，**但被 chromium sandbox 屏蔽**（child process 不继承）
 - patchelf 给 `better_sqlite3.node` 加 NEEDED 失败，因为 electron 把 `.node` 复制到
   `/tmp/.org.chromium.Chromium.<random>` 加载，patchelf 不影响副本
@@ -339,7 +339,18 @@ docker rm -f mmxtest-noble-12345
 3. **C. 换 electron 30** — electron 30 还没用 GLIBC 2.38 的 symbols，工作量很大
 4. **D. 换 WASM sqlite** — 用 `node-sqlite3-wasm`，零 native GLIBC，**唯一干净路线**，
    但要改 `@mavis/local-runtime` 代码
-5. **E. 只支持 noble** — 文档化限制
+5. **E. 只支持 noble** — 文档化限制，jammy/focal 列为 unsupported
+
+### 🟡 P1: OAuth scheme 不确定 (`minimax-cn` vs `minimax-code`)
+
+**问题**：asar 里 `getProtocolNameByEnv()` 动态返回 6 种 scheme：
+`minimax` / `minimax-cn` / `minimax-test` / `minimax-cn-test` / `minimax-staging` / `minimax-cn-staging`
+
+当前 deb `.desktop` 写死 `x-scheme-handler/minimax-cn` (zh 线上版)。如果用户实际是 en 或 test/staging 环境，OAuth callback 唤不回。
+
+**外部 bug 报告**说 web 用 `minimax-code://`，但 asar 代码里**没**这个 scheme — 报告人可能是把 desktop 文件名跟 scheme 搞混了。
+
+**待确认**：要 web 端实际 OAuth `redirect_uri` 列表才能下结论。
 
 ### 🟡 P1: asar 4.3.0 extract 工具 bug
 
@@ -352,9 +363,75 @@ docker rm -f mmxtest-noble-12345
 `find ... | xargs touch -d` 在 1.3GB PKG_ROOT 上慢（5+ 分钟）。
 可改成：cp 完后只 touch 顶层 dir + DEBIAN 几个文件。
 
+### 🟢 P2: headless 测不到 LocalRuntime
+
+`tools/test-ubuntu.sh` 在 docker + Xvfb 里只能验"装包 + 启动到 login 窗口"。
+`v2/sqlite/runtime-state.sqlite` 要等 OAuth 登录后才创建 — 这是 **design limitation**，
+不是 bug。完整 runtime 验证在 `tools/test-real-machine.sh`。
+
 ---
 
-## 7. 常见 troubleshooting
+## 7. Bug 修复日志 (按时间倒序)
+
+### 2026-08-28 — 修 Bug 3 (StartupWMClass)
+
+**问题**：`.desktop` 写 `StartupWMClass=MiniMax Code`，但 electron 实际窗口 WMClass 是 `mmx-agent-electron`（来自 asar `package.json` `name="@mmx-agent/electron"`, `productName=undefined`）。dock 永远显示齿轮。
+
+**修法**：改 `.desktop` (1 行 diff)。
+- `scripts/build-deb.sh:249` `StartupWMClass=MiniMax Code` → `mmx-agent-electron`
+- `scripts/install-protocol-handler.sh:94` 同样改
+
+**验证**：`xprop WM_CLASS` 应该返回 `mmx-agent-electron`，GNOME dock 应该显示正确 logo。
+
+### 2026-08-28 — 修 Bug 4 (install-protocol-handler.sh 硬编码路径)
+
+**问题**：`ELEC_BIN="${ELEC43_DIR:-/home/weekbin/Works/repositories/orca/...}"` 写死开发者机器路径，普通用户跑必报 `[ERROR] 找不到 Electron`。
+
+**修法**：用 `BASH_SOURCE` 自定位：
+- 先用 `ELEC43_DIR` 环境变量（如有）
+- 退到 `<repo>/electron/dist/electron`（如果存在）
+- 都没有则给清晰错误（说怎么装 electron）
+
+**附带改动**：
+- `PROTOCOL_NAME` 也改成环境变量覆盖（默认 `minimax-cn`）
+- 写出的 `.desktop` 名字加 `(dev)` 后缀，避免跟 deb 装的 `minimax-code.desktop` 冲突
+- `StartupWMClass` 同步改成 `mmx-agent-electron` (见 Bug 3)
+
+### 2026-08-27 — 修 Bug 2 (Exec 路径空格引号)
+
+**问题**：`Exec=/opt/MiniMax Code/run.sh %u` 含空格，freedesktop spec 要求加引号。
+
+**修法**：`scripts/build-deb.sh:242` 改成 `Exec="/opt/MiniMax Code/run.sh" %u`。
+
+**验证**：`desktop-file-validate` 严格模式不再发 warning；`gio launch` 能正常启动。
+
+### 2026-08-27 — 修 test-ubuntu.sh 假阴性 (state.db 90s timeout)
+
+**问题**：之前 test 用 90s 等 state.db 创建，但 OAuth 登录要人工，headless 跑不到 — 24.04/26.04 一直报 STARTUP_PARTIAL 假阴性。
+
+**修法**：
+- 改判定标准: `WindowManager login registered` 即 PASS
+- electron timeout 90s → 180s
+- 修几轮 `set -u` heredoc 转义 bug
+- 加 v2_dir 早期 signal
+
+**验证**：6/6 现有 log 都跟新 matrix 预期一致。
+
+### 2026-08-28 — 抽共享 lib (matrix + parse-log)
+
+**之前**：版本支持矩阵写在 EXPECTED bash 数组里，跟 README/AGENTS 容易漂移。
+
+**修法**：
+- `tools/lib/matrix.json` — 单源数据 (glibc/gcc/expected_docker/expected_realmachine/reason)
+- `tools/lib/matrix.sh` — bash 接口 (matrix_codename/image/expected/get/versions)
+- `tools/lib/parse-log.sh` — `parse_log_status <log> <scope=docker|realmachine>`
+- 两个测试脚本都 import 同一个 lib
+
+**附带**：新加 `tools/test-real-machine.sh`（真机/桌面路径，验 OAuth + state.db）。
+
+---
+
+## 8. 常见 troubleshooting
 
 **Symptom**: `dpkg -i` 报缺依赖
 → preinst 没用 sudo 跑。`sudo dpkg -i ...`
@@ -377,7 +454,7 @@ docker rm -f mmxtest-noble-12345
 
 ---
 
-## 8. 如果你是新 agent 接手
+## 9. 如果你是新 agent 接手
 
 1. **读 `AGENTS.md` (本文件)** — 架构、脚本职责、troubleshooting
 2. **读 `README.md`** — 用户视角的快速上手
@@ -406,9 +483,11 @@ docker rm -f mmxtest-noble-12345
 
 - [ ] `dpkg -i` 不用 sudo preinst 也自动装好依赖
 - [ ] `minimax-code` 命令启动到 login UI (在 Xvfb 下也 OK)
-- [ ] `LocalRuntimeUtility` log 显示 "runtime started"
-- [ ] OAuth callback (用 `xdg-mime` 测: `xdg-mime query default x-scheme-handler/minimax-cn`)
-- [ ] better-sqlite3 能 init（`~/.config/MiniMax-Code/state.db` 出现）
+- [ ] **`tools/test-ubuntu.sh 24.04 26.04`** — 跨版本 docker 冒烟 (2/2 PASS)
+- [ ] **`tools/test-real-machine.sh`** — 真机 OAuth + state.db 创建 (release 前)
+- [ ] `xdg-mime query default x-scheme-handler/minimax-cn` 返回 `minimax-code.desktop`
+- [ ] `xprop WM_CLASS` 返回 `mmx-agent-electron` (跟 `.desktop` StartupWMClass 对齐)
+- [ ] better-sqlite3 能 init（`~/.config/MiniMax-Code/v2/sqlite/runtime-state.sqlite` 创建）
 - [ ] `nm -D /opt/MiniMax\ Code/app/app-64/resources/app.asar.unpacked/node_modules/better-sqlite3/build/Release/better_sqlite3.node`
   显示 `fmod` symbol resolved（不是 `U fmod@GLIBC_2.38`）
-- [ ] 在 jammy (GLIBC 2.35) 容器装一遍，看启动有没有 GLIBC 错误
+- [ ] 在 jammy (GLIBC 2.35) 真机装一遍 + 登录, 看启动有没有 GLIBC 错误

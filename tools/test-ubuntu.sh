@@ -152,8 +152,9 @@ echo \"exit=\$RC\"
 echo '--- 关键 log ---'
 grep -E 'LocalRuntimeUtility|GLIBC|fmod|Cannot find package|login|WindowManager|MiniMax Code' /tmp/mmx.log | head -10
 echo '--- runtime 初始化检查 ---'
-# LocalRuntimeUtility 成功会创建 state.db (better-sqlite3 V2 migration)
-if [ -f /root/.config/MiniMax-Code/state.db ] || [ -f /root/.config/MiniMax-Code/local-runtime/state.db ]; then
+# LocalRuntimeUtility V2 migration 创建 runtime-state.sqlite at $DATA_DIR/v2/sqlite/
+DATA_DIR="${MMX_USER_DATA:-/root/.config/MiniMax-Code}"
+if [ -f "$DATA_DIR/v2/sqlite/runtime-state.sqlite" ] || [ -f "$DATA_DIR/state.db" ] || [ -f "$DATA_DIR/local-runtime/state.db" ]; then
     echo 'state_db=ok'
 else
     echo 'state_db=missing'

@@ -16,6 +16,12 @@ sudo dpkg -i dist/minimax-code_3.0.67-inside.44_amd64.deb
 tools/test-ubuntu.sh 24.04
 ```
 
+> ⚠️ **headless 容器限制**：`test-ubuntu.sh` 在 docker + Xvfb 里只能验证
+> **deb 装包 + electron 启动到 login 窗口**。`LocalRuntimeUtility` / `state.db`
+> 要等 OAuth 登录后才会创建，**headless 测不到**。要验完整 runtime 流程，
+> 请在真机 / 桌面环境装 deb 并完成登录（见 `AGENTS.md §5.1`）。
+> 测时报 `state_db=missing (需要 OAuth 登录才能起 LocalRuntime)` 是预期行为，**不是 bug**。
+
 ## Ubuntu 版本支持矩阵 (Aug 2026)
 
 | 版本 | 代号 | GLIBC | gcc | libstdc++ | 装 deb | runtime | 备注 |

@@ -201,6 +201,16 @@ export DISPLAY=:99
 | 25.10 | questing | 2.41+ | PASS | ✅ (短期) |
 | 26.04 | resolute | 2.43+ | PASS | ✅ |
 
+**判定标准（headless 容器可达范围）**：
+- ✅ PASS = `dpkg` 装包 OK + electron 启动到 `WindowManager Registered window: type=login` + 无 GLIBC/missing-pkg 错
+- ⚠️ PARTIAL = 装包 OK + 启动, 但有 GLIBC shim 链路问题
+- ❌ FAIL = 装不上 / 启动不到 WindowManager
+
+**headless 容器测不到什么**：
+- `LocalRuntimeUtility` 要等 OAuth 登录后才起, 所以 `v2/sqlite/runtime-state.sqlite` 不会出现
+- 容器里报 `state_db=missing (需要 OAuth 登录才能起 LocalRuntime)` 是**预期**, 不是 bug
+- 要验完整 runtime 流程 (LocalRuntime ready, OAuth callback, SQLite 读写) 请在真机装 deb 并登录
+
 **用法**:
 ```bash
 # 测所有支持版本 (推荐, 跑一次冒烟)
@@ -249,6 +259,28 @@ apt-get install -y gdb strace ltrace
 strace -f -e openat -o /tmp/strace.log /opt/MiniMax\ Code/run.sh
 # 看 better_sqlite3 加载情况
 grep -E 'better_sqlite3|libmmmx|libm' /tmp/strace.log | head -20
+```
+
+### 5.4 用 `--no-cleanup` 保留容器（推荐 debug 流程）
+
+```bash
+# 测 24.04 失败时, 保留容器进一步调
+tools/test-ubuntu.sh --no-cleanup 24.04
+# 容器名: mmxtest-noble-<pid> (会打印在 log 里)
+docker ps -a | grep mmxtest
+# 进容器
+docker exec -it mmxtest-noble-12345 bash
+# 看 runtime 写过的所有文件
+find /root/.config/MiniMax-Code -type f | head -30
+# 看 shim 是否加载
+cat /proc/$(pgrep -f 'MiniMax Code/run.sh' | head -1)/maps | grep -E 'libmmmx|libm\.so'
+# 看完整 electron log
+cat /tmp/mmx.log
+# 装 gdb 再跑一遍
+apt-get install -y gdb strace
+strace -f -e openat /opt/MiniMax\ Code/run.sh 2>&1 | grep -E 'better_sqlite3|libmmmx'
+# 删容器
+docker rm -f mmxtest-noble-12345
 ```
 
 ---

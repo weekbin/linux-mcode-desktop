@@ -77,6 +77,8 @@ mkdir -p "$(dirname "$DESKTOP_FILE")"
 EXEC_LINE="\"$ELEC_BIN\" --no-sandbox --disable-gpu --in-process-gpu --user-data-dir=\${MMX_USER_DATA:-/tmp/mmx-linux-userdata} \"$APP_ASAR\" %u"
 
 # 写 .desktop
+# 注册 asar PROTOCOL_NAME 可能返回的全部 6 种 scheme (en/zh × prod/test/staging)
+# 这样无论 web 后端 callback 用哪个 scheme, 都能找到 handler
 cat > "$DESKTOP_FILE" <<EOF
 [Desktop Entry]
 Version=1.0
@@ -89,7 +91,7 @@ Icon=$ICON_NAME
 Terminal=false
 NoDisplay=false
 Categories=Development;
-MimeType=$MIME_TYPE;
+MimeType=x-scheme-handler/minimax;x-scheme-handler/minimax-cn;x-scheme-handler/minimax-test;x-scheme-handler/minimax-cn-test;x-scheme-handler/minimax-staging;x-scheme-handler/minimax-cn-staging;
 StartupNotify=true
 StartupWMClass=mmx-agent-electron
 EOF

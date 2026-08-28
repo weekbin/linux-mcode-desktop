@@ -244,7 +244,7 @@ Icon=minimax-code
 Terminal=false
 NoDisplay=false
 Categories=Development;
-MimeType=x-scheme-handler/minimax-cn;
+MimeType=x-scheme-handler/minimax;x-scheme-handler/minimax-cn;x-scheme-handler/minimax-test;x-scheme-handler/minimax-cn-test;x-scheme-handler/minimax-staging;x-scheme-handler/minimax-cn-staging;
 StartupNotify=true
 StartupWMClass=mmx-agent-electron
 EOF
@@ -362,8 +362,11 @@ for sz in 16 32 48 64 128 256 512 scalable; do
 done
 # Update desktop database
 update-desktop-database /usr/share/applications 2>/dev/null || true
-# Refresh mimeapps
-xdg-mime default minimax-code.desktop x-scheme-handler/minimax-cn 2>/dev/null || true
+# Set default for all 6 supported schemes (en/zh × prod/test/staging)
+# 这样用户无论装 zh/en 版本都能唤回
+for scheme in minimax minimax-cn minimax-test minimax-cn-test minimax-staging minimax-cn-staging; do
+    xdg-mime default minimax-code.desktop "x-scheme-handler/${scheme}" 2>/dev/null || true
+done
 echo ""
 echo "✅ MiniMax Code installed. Run with: minimax-code"
 echo "   or find in your application menu."

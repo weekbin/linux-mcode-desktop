@@ -1,0 +1,66 @@
+{
+  "_comment": "Ubuntu 版本支持矩阵. 单一 source of truth, README/AGENTS 都从这里生成.",
+  "schema_version": 1,
+  "versions": {
+    "20.04": {
+      "codename": "focal",
+      "image": "ubuntu:20.04",
+      "glibc": "2.31",
+      "gcc": "9/10",
+      "libstdc": "6.0.28",
+      "expected_docker": "PASS",
+      "expected_realmachine": "FAIL",
+      "reason": "docker: 装包+启动到 login OK (GLIBC 错误在 better_sqlite3 加载时才暴露, post-OAuth); real machine: 登录后 better_sqlite3 加载失败"
+    },
+    "22.04": {
+      "codename": "jammy",
+      "image": "ubuntu:22.04",
+      "glibc": "2.35",
+      "gcc": "11",
+      "libstdc": "6.0.30",
+      "expected_docker": "PASS",
+      "expected_realmachine": "PARTIAL",
+      "reason": "docker: 装包+启动到 login OK; real machine: better_sqlite3 fmod@GLIBC_2.38 链接需 libmmmx shim 验证 (sandbox 屏蔽 LD_PRELOAD, 见 AGENTS §6 P0)"
+    },
+    "24.04": {
+      "codename": "noble",
+      "image": "ubuntu:24.04",
+      "glibc": "2.39",
+      "gcc": "13/14",
+      "libstdc": "recent",
+      "expected_docker": "PASS",
+      "expected_realmachine": "PASS",
+      "reason": "完整支持, 主验证平台"
+    },
+    "25.04": {
+      "codename": "plucky",
+      "image": "ubuntu:25.04",
+      "glibc": "2.41",
+      "gcc": "14",
+      "libstdc": "recent",
+      "expected_docker": "PASS",
+      "expected_realmachine": "PASS",
+      "reason": "EOL, 仅供参考"
+    },
+    "25.10": {
+      "codename": "questing",
+      "image": "ubuntu:25.10",
+      "glibc": "2.41",
+      "gcc": "14",
+      "libstdc": "recent",
+      "expected_docker": "PASS",
+      "expected_realmachine": "PASS",
+      "reason": "短支持周期 (9 月 EOL), 不推荐生产"
+    },
+    "26.04": {
+      "codename": "resolute",
+      "image": "ubuntu:26.04",
+      "glibc": "2.43",
+      "gcc": "15",
+      "libstdc": "recent",
+      "expected_docker": "PASS",
+      "expected_realmachine": "PASS",
+      "reason": "完整支持, 最新 LTS, 全功能"
+    }
+  }
+}

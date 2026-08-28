@@ -14,26 +14,34 @@ sudo dpkg -i dist/minimax-code_3.0.67-inside.44_amd64.deb
 
 # 3) 跨版本冒烟测试 (docker)
 tools/test-ubuntu.sh 24.04
+
+# 4) 真机/桌面 runtime 验证 (release 前必跑, 要 GUI + OAuth 账号)
+tools/test-real-machine.sh
 ```
 
-> ⚠️ **headless 容器限制**：`test-ubuntu.sh` 在 docker + Xvfb 里只能验证
-> **deb 装包 + electron 启动到 login 窗口**。`LocalRuntimeUtility` / `state.db`
-> 要等 OAuth 登录后才会创建，**headless 测不到**。要验完整 runtime 流程，
-> 请在真机 / 桌面环境装 deb 并完成登录（见 `AGENTS.md §5.1`）。
-> 测时报 `state_db=missing (需要 OAuth 登录才能起 LocalRuntime)` 是预期行为，**不是 bug**。
+> **双路径验证**:
+> - `tools/test-ubuntu.sh` — docker headless, 验装包+启动 (CI / 日常冒烟)
+> - `tools/test-real-machine.sh` — 真机/桌面, 验装包+OAuth+LocalRuntime+state.db (release 前)
+>
+> 两条路径共用版本支持矩阵 (`tools/lib/matrix.json`)。
+> headless 容器里报 `state_db=missing` = 预期，**不是 bug** (OAuth 跑不到)。
+> 完整说明见 `AGENTS.md §5`。
 
 ## Ubuntu 版本支持矩阵 (Aug 2026)
 
-| 版本 | 代号 | GLIBC | gcc | libstdc++ | 装 deb | runtime | 备注 |
-|------|------|-------|-----|-----------|--------|---------|------|
+| 版本 | 代号 | GLIBC | gcc | libstdc++ | 装 deb | 真机 runtime | 备注 |
+|------|------|-------|-----|-----------|--------|--------------|------|
 | **26.04 LTS** | resolute | 2.43+ | 15 | recent | ✅ | ✅ | Resolute Raccoon, 最新 LTS, 全功能 |
 | **24.04 LTS** | noble | 2.39 | 13/14 | recent | ✅ | ✅ | Noble Numbat, 主要验证平台 |
 | 25.10 | questing | 2.41 | 14 | recent | ✅ | ✅ | 短支持周期 (9 月 EOL)，不推荐生产 |
 | 25.04 | plucky | 2.41 | 14 | recent | ✅ | ✅ | 已 EOL, 仅供参考 |
 | **22.04 LTS** | jammy | 2.35 | 11 | libstdc++.6.0.30 | ✅ | ⚠️ | 需 libmmmx.so 链接验证 (见 AGENTS §6 P0) |
-| **20.04 LTS** | focal | 2.31 | 9/10 | libstdc++.6.0.28 | ❌ | ❌ | GLIBC 太老, V8 symbols 不全 |
+| **20.04 LTS** | focal | 2.31 | 9/10 | libstdc++.6.0.28 | ✅ | ❌ | GLIBC 太老, better_sqlite3 加载失败 (post-OAuth) |
 
 **Legend**: ✅ 完全支持  ⚠️ 装可，runtime 需额外步骤  ❌ 不支持
+
+> 注: docker 冒烟测试所有版本都是 PASS (装包+启动到 login), 真机测才暴露 GLIBC 问题.
+> 矩阵由 `tools/lib/matrix.json` 单源维护, 文档和测试脚本都引用它.
 
 ## 关键依赖 (按版本)
 
@@ -52,7 +60,9 @@ tools/test-ubuntu.sh 24.04
 
 - **[docs/PIPELINE.md](./docs/PIPELINE.md)** — 完整 exe→deb 端到端流程（Mac/Ubuntu side-by-side, input/output 约定, 已知坑）
 - **[AGENTS.md](./AGENTS.md)** — 给 AI agent 看的：架构、脚本职责、troubleshooting、已知问题
-- **[tools/test-ubuntu.sh](./tools/test-ubuntu.sh)** — 跨 Ubuntu 版本自动冒烟测试
+- **[tools/test-ubuntu.sh](./tools/test-ubuntu.sh)** — docker headless 冒烟测试
+- **[tools/test-real-machine.sh](./tools/test-real-machine.sh)** — 真机/桌面 runtime 验证
+- **[tools/lib/](./tools/lib/)** — 共享工具 (matrix.json + matrix.sh + parse-log.sh)
 - **[scripts/](./scripts/)** — 6 个 bash 脚本，从 NSIS 到 .deb 全流程
 - **[src/](./src/)** — 关键 patch 源码（libmmmx shim + binding.gyp patch）
 

@@ -22,6 +22,13 @@ linux-mcode-desktop/
 │   ├── libmmmx-shim.map     # linker version script
 │   ├── build-shim.sh        # 编译 shim
 │   └── better-sqlite3-binding.gyp.patch  # 给 better-sqlite3 加 -lmmmx 的 patch
+├── tools/                   # 验证工具 (双路径)
+│   ├── test-ubuntu.sh       # 路径 B: docker headless 冒烟 (CI / 日常)
+│   ├── test-real-machine.sh # 路径 A: 真机/桌面 runtime 验证 (release 前必跑)
+│   └── lib/
+│       ├── matrix.json      # 版本支持矩阵单源数据
+│       ├── matrix.sh        # bash 接口: matrix_codename / matrix_image / matrix_expected
+│       └── parse-log.sh     # 从 log 抽 status: parse_log_status <log> <scope>
 ├── docs/
 │   └── PIPELINE.md          # 完整 exe→deb 流程 (Mac/Ubuntu side-by-side, input/output 约定, 已知坑)
 ├── README.md
@@ -161,84 +168,108 @@ set +e  # 不要让单个错误中止整个 preinst
 
 ---
 
-## 5. 端到端验证
+## 5. 端到端验证 (双路径)
 
-### 5.1 单版本快速测 (noble)
+release 前必须两个路径都过：
 
-```bash
-# 在 Ubuntu 24.04 noble 容器:
-docker run -it --rm -v /tmp/.X11-unix:/tmp/.X11-unix -e DISPLAY ubuntu:24.04 bash
-apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
-    libnss3 libdrm2 libnotify4 libgbm1 libxkbcommon0 xdg-utils xvfb
+| 路径 | 工具 | 范围 | 谁能跑 |
+|------|------|------|--------|
+| **Docker headless** (CI / smoke) | `tools/test-ubuntu.sh` | 装包 + 启动到 login + 无 GLIBC 错 | 任何人, 任意 Linux |
+| **真机 desktop** (final release) | `tools/test-real-machine.sh` | 装包 + 启动 + OAuth + LocalRuntime + state.db | 真实 Ubuntu + GUI + 账号 |
 
-# 装 deb
-dpkg -i /path/to/minimax-code_3.0.67-inside.44_amd64.deb
+**为什么两条路径**：
+- headless 容器跑不到 OAuth，state.db / v2_dir 永远创建不出来
+- 真机跑 CI 太重 (要 GUI + 账号)
+- 两条路径共用版本支持矩阵 (`tools/lib/matrix.json`)，不会漂移
 
-# 启动 (X server 必需, 用 Xvfb)
-Xvfb :99 -screen 0 1280x800x24 &
-export DISPLAY=:99
-/opt/MiniMax\ Code/run.sh
+### 5.1 路径 A — 真机 / 桌面 (`tools/test-real-machine.sh`)
 
-# 看 log 看 LocalRuntimeUtility ready
-```
-
-成功 log 关键 marker：
-```
-[info]  [LocalRuntime] Launch plan: buildEnv=prod
-[info]  [LocalRuntimeUtility] runtime started
-[info]  [WindowManager] Registered window: type=login, id=1
-```
-
-### 5.2 跨版本自动测试 (`tools/test-ubuntu.sh`)
-
-**支持版本** (Aug 2026):
-| 版本 | 代号 | GLIBC | 预期 | 测过 |
-|------|------|-------|------|------|
-| 20.04 | focal | 2.31 | FAIL | ❌ GLIBC 太老, V8 symbols 不全 |
-| 22.04 | jammy | 2.35 | PARTIAL | ⚠️ 装可, runtime 需 shim 链接 |
-| 24.04 | noble | 2.39 | PASS | ✅ |
-| 25.04 | plucky | 2.41 | PASS | ✅ (EOL) |
-| 25.10 | questing | 2.41+ | PASS | ✅ (短期) |
-| 26.04 | resolute | 2.43+ | PASS | ✅ |
-
-**判定标准（headless 容器可达范围）**：
-- ✅ PASS = `dpkg` 装包 OK + electron 启动到 `WindowManager Registered window: type=login` + 无 GLIBC/missing-pkg 错
-- ⚠️ PARTIAL = 装包 OK + 启动, 但有 GLIBC shim 链路问题
-- ❌ FAIL = 装不上 / 启动不到 WindowManager
-
-**headless 容器测不到什么**：
-- `LocalRuntimeUtility` 要等 OAuth 登录后才起, 所以 `v2/sqlite/runtime-state.sqlite` 不会出现
-- 容器里报 `state_db=missing (需要 OAuth 登录才能起 LocalRuntime)` 是**预期**, 不是 bug
-- 要验完整 runtime 流程 (LocalRuntime ready, OAuth callback, SQLite 读写) 请在真机装 deb 并登录
+**真 PASS 标准**：`state.db` 创建 (即 LocalRuntimeUtility 跑完 V2 migration)
 
 **用法**:
 ```bash
-# 测所有支持版本 (推荐, 跑一次冒烟)
+# 完整测 (默认 10 min timeout, 给 OAuth 留时间)
+tools/test-real-machine.sh
+
+# 只到 login 窗口 (不需要账号, 用于日常 debug)
+tools/test-real-machine.sh --until-login
+
+# 自定义 timeout + 跳过装包
+tools/test-real-machine.sh --timeout 300 --skip-install
+```
+
+**前置**:
+- 在目标 Ubuntu 机器上跑 (不能 docker)
+- 已 build 的 `dist/minimax-code_3.0.67-inside.44_amd64.deb`
+- GUI (有 DISPLAY / wayland，没有会自动 fallback Xvfb)
+- 网络 + 真实账号 (OAuth 登录)
+
+**判定 (scope=realmachine)**:
+- ✅ `RUNTIME_PASS` = `state.db` 创建或 `LocalRuntimeUtility runtime ready`
+- ⏸ `LOGIN_READY` = `WindowManager login registered` 但还没登录 (超时前未到 RUNTIME_PASS)
+- ❌ `STARTUP_FAIL` = 装不上 / 启动不到 WindowManager
+- ❌ `GLIBC_ERROR` / `MISSING_PKG` (任何路径都致命)
+
+**真机版本支持矩阵** (来自 `tools/lib/matrix.json`):
+| 版本 | 代号 | 预期 | 原因 |
+|------|------|------|------|
+| 20.04 | focal | FAIL | better_sqlite3 GLIBC 2.31 加载失败 (post-OAuth) |
+| 22.04 | jammy | PARTIAL | better_sqlite3 fmod@GLIBC_2.38 需 libmmmx 验证 (sandbox 屏蔽 LD_PRELOAD, §6 P0) |
+| 24.04 | noble | PASS | 主验证平台 |
+| 25.04 | plucky | PASS | EOL, 仅供参考 |
+| 25.10 | questing | PASS | 短支持周期 |
+| 26.04 | resolute | PASS | 最新 LTS |
+
+### 5.2 路径 B — Docker headless (`tools/test-ubuntu.sh`)
+
+**headless 真 PASS 标准**：`WindowManager login registered` + 无 GLIBC/missing-pkg 错
+
+> ⚠️ headless 容器**测不到** LocalRuntime / state.db (要 OAuth 登录)
+> 容器里报 `state_db=missing` = 预期，**不是 bug**
+
+**用法**:
+```bash
+# 测所有支持版本
 tools/test-ubuntu.sh
 
-# 只测某个版本
-tools/test-ubuntu.sh 24.04
-tools/test-ubuntu.sh 26.04
+# 只测某些版本
+tools/test-ubuntu.sh 24.04 26.04
 
 # 测完保留容器 (debug)
 tools/test-ubuntu.sh --no-cleanup 24.04
 
-# 自定义 deb 路径
+# 自定义 deb
 DEB_PATH=/path/to/deb tools/test-ubuntu.sh 24.04
 ```
 
-**前置**:
-- docker (镜像会自动 pull)
-- 已 build 的 `dist/minimax-code_3.0.67-inside.44_amd64.deb`
-- 充足磁盘 (每个容器临时 ~2GB)
+**前置**: docker (镜像自动 pull) + 已 build 的 deb + 充足磁盘 (~2GB / 容器)
 
-**log 位置**: `.test-logs/<codename>.log` (在仓库内, .gitignore 排除)
+**判定 (scope=docker)**:
+- ✅ `RUNTIME_PASS` = 意外之喜，state.db 真创建出来了
+- ✅ `PASS` = `WindowManager login registered` + 无 GLIBC/missing-pkg 错
+- ❌ `GLIBC_ERROR` / `MISSING_PKG` / `STARTUP_FAIL`
 
-**exit code**:
-- 0 = 所有版本都符合预期
-- 1 = 有版本跟预期不符 (通常是新发现的 bug)
+**docker 版本支持矩阵** (来自 `tools/lib/matrix.json`):
+| 版本 | 预期 | 原因 |
+|------|------|------|
+| 20.04 focal | PASS | 装包+启动 OK (GLIBC 错只在 better_sqlite3 加载时才暴露, post-OAuth) |
+| 22.04 jammy | PASS | 同上 |
+| 24.04 noble | PASS | 主验证平台 |
+| 25.04 plucky | PASS | EOL |
+| 25.10 questing | PASS | 短支持 |
+| 26.04 resolute | PASS | 最新 LTS |
 
-### 5.3 手动 debug 单个版本
+> **重要**: docker scope 的 PASS 不代表真机能跑。release 前必须 §5.1 真机路径也过。
+
+### 5.3 共享工具
+
+- **`tools/lib/matrix.json`** — 版本支持矩阵单源数据 (glibc / gcc / 预期 / reason)
+- **`tools/lib/matrix.sh`** — bash 接口: `matrix_codename` / `matrix_image` / `matrix_expected` / `matrix_get`
+- **`tools/lib/parse-log.sh`** — 从 log 抽 status token: `parse_log_status <log> <scope>`
+
+两个测试脚本都 import 这俩 lib，矩阵和判定逻辑**不会**在两个脚本里漂移。
+
+### 5.4 手动 debug 单个版本 (docker)
 
 ```bash
 # 启动一个 24.04 容器并保持运行
@@ -261,7 +292,7 @@ strace -f -e openat -o /tmp/strace.log /opt/MiniMax\ Code/run.sh
 grep -E 'better_sqlite3|libmmmx|libm' /tmp/strace.log | head -20
 ```
 
-### 5.4 用 `--no-cleanup` 保留容器（推荐 debug 流程）
+### 5.5 用 `--no-cleanup` 保留容器（推荐 docker debug 流程）
 
 ```bash
 # 测 24.04 失败时, 保留容器进一步调

@@ -152,7 +152,7 @@ echo \"exit=\$RC\"
 echo '--- 关键 log ---'
 grep -E 'LocalRuntimeUtility|GLIBC|fmod|Cannot find package|login|WindowManager|MiniMax Code' /tmp/mmx.log | head -10
 echo '--- runtime 初始化检查 ---'
-# LocalRuntimeUtility V2 migration 创建 runtime-state.sqlite at $DATA_DIR/v2/sqlite/
+# LocalRuntimeUtility V2 migration 创建 runtime-state.sqlite
 # outer set -u 下面用 :? 也不行, 改用最直接的方式: hard-code path
 STATE_DB="/root/.config/MiniMax-Code/v2/sqlite/runtime-state.sqlite"
 if [ -f "\$STATE_DB" ] || [ -f "/root/.config/MiniMax-Code/state.db" ] || [ -f "/root/.config/MiniMax-Code/local-runtime/state.db" ]; then

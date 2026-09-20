@@ -20,7 +20,7 @@ DIST_DIR="$PROJECT_ROOT/dist"
 WORK_DIR="/tmp/minimax-code-targz-build"
 PACKAGE_NAME="minimax-code"
 APP_DISPLAY_NAME="MiniMax Code"
-VERSION="3.0.67-inside.44"
+VERSION="3.0.73"
 ARCH="linux-x64"
 PACKAGE_DIR="minimax-code-${VERSION}-${ARCH}"
 
@@ -28,6 +28,12 @@ PACKAGE_DIR="minimax-code-${VERSION}-${ARCH}"
 ELEC43_SRC="${ELEC43_DIR:-/home/weekbin/Works/repositories/orca/node_modules/.pnpm/electron@43.1.0/node_modules/electron}"
 APP_ASAR_SRC="$PROJECT_ROOT/unpacked/app-64"
 ICON_PNG_SRC="$PROJECT_ROOT/unpacked/app-64/resources/resources/icon.png"
+if [ ! -f "$ICON_PNG_SRC" ]; then
+    ICON_PNG_SRC="$PROJECT_ROOT/unpacked/app-64/resources/resources/icon.ico"
+fi
+if [ ! -f "$ICON_PNG_SRC" ]; then
+    ICON_PNG_SRC="$PROJECT_ROOT/unpacked/app-64/resources/resources/icon.icns"
+fi
 
 # 检查
 if [ ! -x "$ELEC43_SRC/dist/electron" ]; then
@@ -69,12 +75,37 @@ rm -rf "$STAGE/app/app-64/resources/app.asar.unpacked/node_modules/node-pty/preb
 rm -rf "$STAGE/app/app-64/resources/app.asar.unpacked/node_modules/@vscode/ripgrep-win32-x64"
 chmod -R go+rX "$STAGE/app"
 
+# ===== 2b) libfmod_shim.so — 与 deb 的 run.sh 对齐 =====
+# better-sqlite3 v12 在 noble (GLIBC 2.39) rebuild 后会要 fmod@GLIBC_2.38,
+# jammy (2.35) / focal (2.31) 系统 libm 没这个 versioned symbol。
+# shim 提供兼容实现, wrapper LD_PRELOAD 它 (跟 build-deb.sh 的 run.sh 同一套路)。
+SHIM_SRC="$PROJECT_ROOT/lib/libfmod_shim.so"
+if [ -f "$SHIM_SRC" ]; then
+  cp -f "$SHIM_SRC" "$STAGE/libfmod_shim.so"
+  chmod 755 "$STAGE/libfmod_shim.so"
+  echo "[tgz] ✓ libfmod_shim.so 复制到 stage"
+else
+  echo "[WARN] 找不到 $SHIM_SRC, 没装 shim (旧版系统可能跑不起来)"
+fi
+
 # ===== 3) bin/minimax-code =====
+# LD_PRELOAD 路径含空格不能 quote (colon-separated list 不支持 quoting),
+# 所以 cp 到无空格路径 /tmp/minimax-fmod-shim.so, 跟 deb run.sh 一致
 mkdir -p "$STAGE/bin"
 cat > "$STAGE/bin/minimax-code" <<EOF
 #!/usr/bin/env bash
 # MiniMax Code Linux GUI client
 APP_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")/.." && pwd)"
+
+SHIM_PATH="\$APP_DIR/libfmod_shim.so"
+if [ -f "\$SHIM_PATH" ]; then
+    SHIM_LINK="/tmp/minimax-fmod-shim.so"
+    cp -f "\$SHIM_PATH" "\$SHIM_LINK" 2>/dev/null || true
+    if [ -f "\$SHIM_LINK" ]; then
+        export LD_PRELOAD="\$SHIM_LINK\${LD_PRELOAD:+:\$LD_PRELOAD}"
+    fi
+fi
+
 exec "\$APP_DIR/electron/dist/electron" \\
   --no-sandbox \\
   --disable-gpu \\
@@ -99,9 +130,9 @@ Exec="\$APP_DIR/bin/minimax-code" %u
 Icon=minimax-code
 Terminal=false
 Categories=Development;
-MimeType=x-scheme-handler/minimax-cn;
+MimeType=x-scheme-handler/minimax;x-scheme-handler/minimax-cn;x-scheme-handler/minimax-test;x-scheme-handler/minimax-cn-test;x-scheme-handler/minimax-staging;x-scheme-handler/minimax-cn-staging;
 StartupNotify=true
-StartupWMClass=MiniMax Code
+StartupWMClass=mmx-agent-electron
 EOF
 # 多尺寸 PNG
 for sz in 16 32 48 64 128 256 512; do
@@ -146,15 +177,25 @@ echo "[1/5] 复制 $PREFIX/share/$PACKAGE_NAME/ ..."
 $SUDO mkdir -p "$PREFIX/share/$PACKAGE_NAME"
 $SUDO cp -r "$STAGE_DIR/app" "$PREFIX/share/$PACKAGE_NAME/"
 $SUDO cp -r "$STAGE_DIR/electron" "$PREFIX/share/$PACKAGE_NAME/"
+$SUDO cp "$STAGE_DIR/libfmod_shim.so" "$PREFIX/share/$PACKAGE_NAME/" 2>/dev/null || true
 $SUDO cp "$STAGE_DIR/share/applications/$PACKAGE_NAME.desktop" \
          "$PREFIX/share/applications/$PACKAGE_NAME.desktop" 2>/dev/null || true
 $SUDO cp -r "$STAGE_DIR/share/icons"/* "$PREFIX/share/icons/" 2>/dev/null || true
 
 # 2) bin/ wrapper
+# LD_PRELOAD 路径含空格不能 quote, cp 到无空格路径 (跟 deb 的 run.sh 一致)
 echo "[2/5] 复制 wrapper 到 $PREFIX/bin/ ..."
 $SUDO mkdir -p "$PREFIX/bin"
 $SUDO tee "$PREFIX/bin/$PACKAGE_NAME" > /dev/null <<WRAPPER_EOF
 #!/usr/bin/env bash
+SHIM_PATH="$PREFIX/share/$PACKAGE_NAME/libfmod_shim.so"
+if [ -f "\$SHIM_PATH" ]; then
+    SHIM_LINK="/tmp/minimax-fmod-shim.so"
+    cp -f "\$SHIM_PATH" "\$SHIM_LINK" 2>/dev/null || true
+    if [ -f "\$SHIM_LINK" ]; then
+        export LD_PRELOAD="\$SHIM_LINK\${LD_PRELOAD:+:\$LD_PRELOAD}"
+    fi
+fi
 exec "$PREFIX/share/$PACKAGE_NAME/electron/dist/electron" \\
   --no-sandbox \\
   --disable-gpu \\
@@ -170,11 +211,13 @@ if [ -f "$PREFIX/share/applications/$PACKAGE_NAME.desktop" ]; then
             "$PREFIX/share/applications/$PACKAGE_NAME.desktop"
 fi
 
-# 4) 注册 minimax-cn:// protocol
-echo "[3/5] 注册 minimax-cn:// protocol handler ..."
+# 4) 注册全部 6 种 minimax:// scheme (en/zh × prod/test/staging, 跟 asar 内一致)
+echo "[3/5] 注册 minimax:// protocol handlers (6 schemes) ..."
 DESKTOP_FILE="$PREFIX/share/applications/$PACKAGE_NAME.desktop"
 if command -v xdg-mime >/dev/null 2>&1; then
-  $SUDO xdg-mime default "$PACKAGE_NAME.desktop" x-scheme-handler/minimax-cn 2>/dev/null || true
+  for scheme in minimax minimax-cn minimax-test minimax-cn-test minimax-staging minimax-cn-staging; do
+    $SUDO xdg-mime default "$PACKAGE_NAME.desktop" "x-scheme-handler/$scheme" 2>/dev/null || true
+  done
 fi
 if command -v update-desktop-database >/dev/null 2>&1; then
   $SUDO update-desktop-database "$PREFIX/share/applications/" 2>/dev/null || true

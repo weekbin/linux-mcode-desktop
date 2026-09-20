@@ -1,0 +1,282 @@
+"use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.prepareLocalRuntimeNativeSqliteEnv = prepareLocalRuntimeNativeSqliteEnv;
+exports.resolveLocalRuntimeRepoRoot = resolveLocalRuntimeRepoRoot;
+exports.shouldUseDevNativeSqlite = shouldUseDevNativeSqlite;
+const node_child_process_1 = require("node:child_process");
+const node_fs_1 = require("node:fs");
+const path = __importStar(require("node:path"));
+const logger_1 = __importDefault(require("../../utils/logger"));
+function prepareLocalRuntimeNativeSqliteEnv(electronApp = getElectronApp()) {
+    if (process.env.MAVIS_SQLITE3_MODULE_PATH?.trim())
+        return;
+    if (!electronApp)
+        return;
+    // === mmx-patch: Linux desktop port (weekbin/linux-mcode-desktop)
+    // 跳过 dev 流程: 我们没装 prebuild-install, electron 又是手动跑 (<asar>),
+    // app.isPackaged=false, 触发 shouldUseDevNativeSqlite=true 但找不到 prebuild-install binary
+    // → utility subprocess fork 后 require('better-sqlite3') 失败 → handshake failed
+    // 改: 直接把 MAVIS_SQLITE3_MODULE_PATH 指向 asar.unpacked 里的 better-sqlite3 (已有 Linux .node)
+    const appPath = electronApp.getAppPath();
+    if (appPath && appPath.endsWith('.asar')) {
+        const unpackedDir = appPath.replace(/\.asar$/, '.asar.unpacked');
+        const sqlitePath = path.join(unpackedDir, 'node_modules', 'better-sqlite3');
+        if ((0, node_fs_1.existsSync)(path.join(sqlitePath, 'build', 'Release', 'better_sqlite3.node'))) {
+            process.env.MAVIS_SQLITE3_MODULE_PATH = sqlitePath;
+            process.env.NODE_PATH = path.join(unpackedDir, 'node_modules');
+            logger_1.default.info(`[LocalRuntime] mmx-patch: pointing MAVIS_SQLITE3_MODULE_PATH at ${sqlitePath}`);
+            return;
+        }
+    }
+    // fallback: 原 dev 路径 (prebuild-install, 已 pack 的 electron-builder 安装)
+    if (!shouldUseDevNativeSqlite({ kind: 'compiled' }, electronApp))
+        return;
+    const repoRoot = resolveLocalRuntimeRepoRoot(electronApp);
+    if (!repoRoot)
+        return;
+    const nativeSqlite = ensureDevNativeBetterSqlite3(repoRoot, electronApp);
+    if (!nativeSqlite)
+        return;
+    process.env.MAVIS_SQLITE3_MODULE_PATH = nativeSqlite.modulePath;
+    process.env.NODE_PATH = nativeSqlite.nodePath;
+}
+function resolveLocalRuntimeRepoRoot(electronApp) {
+    const packageJsonPath = firstExisting(resolveLocalRuntimePackageJsonCandidates(electronApp));
+    if (!packageJsonPath) {
+        logger_1.default.error('[LocalRuntime] @mavis/local-runtime package not found for native sqlite');
+        return undefined;
+    }
+    return resolveRuntimeRoot(path.dirname((0, node_fs_1.realpathSync)(packageJsonPath)));
+}
+function shouldUseDevNativeSqlite(entryPoint, electronApp) {
+    if (entryPoint.kind === 'typescript')
+        return true;
+    if (electronApp.isPackaged === false)
+        return true;
+    return !electronApp.getAppPath().includes('app.asar');
+}
+function resolveRuntimeRoot(packageDir) {
+    return path.basename(path.dirname(packageDir)) === '@mavis'
+        ? path.resolve(packageDir, '..', '..', '..')
+        : path.resolve(packageDir, '..', '..');
+}
+function firstExisting(candidates) {
+    return candidates.find((candidate) => (0, node_fs_1.existsSync)(candidate));
+}
+function resolveLocalRuntimePackageJsonCandidates(electronApp) {
+    const appPath = electronApp?.getAppPath();
+    return uniqueNonEmpty([
+        appPath ? path.join(appPath, 'node_modules', '@mavis', 'local-runtime', 'package.json') : '',
+        appPath ? path.join(appPath, '..', '..', 'packages', 'local-runtime', 'package.json') : '',
+        path.join(process.cwd(), 'node_modules', '@mavis', 'local-runtime', 'package.json'),
+        path.join(process.cwd(), 'packages', 'local-runtime', 'package.json'),
+        path.join(process.cwd(), '..', '..', 'packages', 'local-runtime', 'package.json'),
+    ]);
+}
+function uniqueNonEmpty(values) {
+    return [...new Set(values.filter(Boolean))];
+}
+function ensureDevNativeBetterSqlite3(repoRoot, electronApp) {
+    const sourceModuleDir = path.join(repoRoot, 'node_modules', 'better-sqlite3');
+    const sourcePkgPath = path.join(sourceModuleDir, 'package.json');
+    if (!(0, node_fs_1.existsSync)(sourcePkgPath)) {
+        logger_1.default.error(`[LocalRuntime] better-sqlite3 package not found: ${sourcePkgPath}`);
+        return undefined;
+    }
+    const sourcePkg = readPackageJson(sourcePkgPath);
+    const electronVersion = process.versions.electron || 'unknown';
+    const runtimeRoot = path.join(electronApp.getPath('userData'), 'native-modules', `better-sqlite3-${sourcePkg.version ?? 'unknown'}-electron-${electronVersion}`);
+    const runtimeNodeModules = path.join(runtimeRoot, 'node_modules');
+    const runtimeModuleDir = path.join(runtimeNodeModules, 'better-sqlite3');
+    const runtimeBinary = path.join(runtimeModuleDir, 'build', 'Release', 'better_sqlite3.node');
+    const runtimeMarker = path.join(runtimeRoot, '.minimax-electron-native.json');
+    const runtimeDependencyNames = Object.keys(sourcePkg.dependencies ?? {});
+    const runtimeDependenciesPresent = runtimeDependencyNames.every((dependencyName) => (0, node_fs_1.existsSync)(path.join(resolveNodeModulesPackageDir(runtimeNodeModules, dependencyName), 'package.json')));
+    const marker = readNativeModuleMarker(runtimeMarker);
+    const markerMatches = marker?.electronVersion === electronVersion &&
+        marker?.modules === process.versions.modules &&
+        marker?.sourceVersion === sourcePkg.version &&
+        runtimeDependenciesPresent;
+    if (!(0, node_fs_1.existsSync)(runtimeBinary) || !markerMatches) {
+        const installBin = resolvePrebuildInstallBin(repoRoot);
+        if (!installBin) {
+            logger_1.default.info('[LocalRuntime] prebuild-install binary not found, skipping (Linux runtime copy)');
+            return undefined;
+        }
+        logger_1.default.info(`[LocalRuntime] Preparing Electron-native better-sqlite3 in ${runtimeRoot}`);
+        (0, node_fs_1.rmSync)(runtimeRoot, { recursive: true, force: true });
+        (0, node_fs_1.mkdirSync)(runtimeNodeModules, { recursive: true });
+        (0, node_fs_1.writeFileSync)(path.join(runtimeRoot, 'package.json'), JSON.stringify({ name: 'mavis-electron-dev-native', private: true }, null, 2) + '\n');
+        (0, node_fs_1.cpSync)(sourceModuleDir, runtimeModuleDir, { recursive: true });
+        copyNativeRuntimeDependencies(repoRoot, runtimeNodeModules, runtimeDependencyNames);
+        const result = (0, node_child_process_1.spawnSync)(installBin, ['--runtime', 'electron', '--target', electronVersion, '--tag-prefix', 'v', '--force'], {
+            cwd: runtimeModuleDir,
+            windowsHide: true,
+            shell: process.platform === 'win32',
+            env: {
+                ...process.env,
+                PATH: buildRuntimePath(repoRoot),
+            },
+            encoding: 'utf-8',
+        });
+        if (result.status !== 0 || !(0, node_fs_1.existsSync)(runtimeBinary)) {
+            logger_1.default.error(`[LocalRuntime] Failed to prepare Electron-native better-sqlite3: ${result.stderr || result.stdout || 'unknown error'}`);
+            return undefined;
+        }
+        logger_1.default.info(`[LocalRuntime] Electron-native better-sqlite3 ready: ${runtimeModuleDir}`);
+        (0, node_fs_1.writeFileSync)(runtimeMarker, JSON.stringify({
+            electronVersion,
+            modules: process.versions.modules,
+            sourceVersion: sourcePkg.version ?? 'unknown',
+            rebuiltAt: new Date().toISOString(),
+        }, null, 2) + '\n');
+    }
+    return {
+        modulePath: runtimeModuleDir,
+        nodePath: buildNodePath([
+            runtimeNodeModules,
+            path.join(repoRoot, 'node_modules'),
+            process.env.NODE_PATH,
+        ]),
+    };
+}
+function copyNativeRuntimeDependencies(repoRoot, runtimeNodeModules, dependencyNames) {
+    const repoNodeModules = path.join(repoRoot, 'node_modules');
+    const seen = new Set();
+    for (const dependencyName of dependencyNames) {
+        copyNativeRuntimeDependency(repoNodeModules, runtimeNodeModules, dependencyName, seen);
+    }
+}
+function copyNativeRuntimeDependency(repoNodeModules, runtimeNodeModules, dependencyName, seen) {
+    if (seen.has(dependencyName))
+        return;
+    seen.add(dependencyName);
+    const sourceDir = resolveNodeModulesPackageDir(repoNodeModules, dependencyName);
+    const targetDir = resolveNodeModulesPackageDir(runtimeNodeModules, dependencyName);
+    const sourcePkgPath = path.join(sourceDir, 'package.json');
+    if (!(0, node_fs_1.existsSync)(sourcePkgPath)) {
+        logger_1.default.warn(`[LocalRuntime] Native sqlite dependency missing: ${dependencyName}`);
+        return;
+    }
+    (0, node_fs_1.mkdirSync)(path.dirname(targetDir), { recursive: true });
+    (0, node_fs_1.cpSync)(sourceDir, targetDir, { recursive: true });
+    const pkg = readPackageJson(sourcePkgPath);
+    for (const transitiveName of Object.keys(pkg.dependencies ?? {})) {
+        copyNativeRuntimeDependency(repoNodeModules, runtimeNodeModules, transitiveName, seen);
+    }
+}
+function resolveNodeModulesPackageDir(nodeModulesDir, packageName) {
+    return path.join(nodeModulesDir, ...packageName.split('/'));
+}
+function readPackageJson(packageJsonPath) {
+    return JSON.parse((0, node_fs_1.readFileSync)(packageJsonPath, 'utf-8'));
+}
+function readNativeModuleMarker(markerPath) {
+    try {
+        return JSON.parse((0, node_fs_1.readFileSync)(markerPath, 'utf-8'));
+    }
+    catch {
+        return undefined;
+    }
+}
+function getElectronApp() {
+    if (process.env.VITEST === 'true')
+        return undefined;
+    try {
+        const electron = require('electron');
+        return electron.app;
+    }
+    catch {
+        return undefined;
+    }
+}
+function resolvePrebuildInstallBin(repoRoot) {
+    const candidate = path.join(repoRoot, 'node_modules', '.bin', process.platform === 'win32' ? 'prebuild-install.cmd' : 'prebuild-install');
+    return (0, node_fs_1.existsSync)(candidate) ? candidate : undefined;
+}
+function buildRuntimePath(repoRoot) {
+    const parts = [
+        path.join(repoRoot, 'node_modules', '.bin'),
+        getUserShellPath(),
+        process.env.PATH || '',
+    ];
+    const seen = new Set();
+    const ordered = [];
+    for (const part of parts) {
+        for (const segment of part.split(path.delimiter)) {
+            const value = segment.trim();
+            if (value && !seen.has(value)) {
+                seen.add(value);
+                ordered.push(value);
+            }
+        }
+    }
+    return ordered.join(path.delimiter);
+}
+function buildNodePath(entries) {
+    const seen = new Set();
+    const ordered = [];
+    for (const entry of entries) {
+        if (!entry)
+            continue;
+        for (const segment of entry.split(path.delimiter)) {
+            const value = segment.trim();
+            if (value && !seen.has(value)) {
+                seen.add(value);
+                ordered.push(value);
+            }
+        }
+    }
+    return ordered.join(path.delimiter);
+}
+function getUserShellPath() {
+    if (process.platform === 'win32')
+        return process.env.PATH || '';
+    try {
+        const shell = process.env.SHELL || '/bin/zsh';
+        return (0, node_child_process_1.spawnSync)(shell, ['-ilc', 'echo -n "$PATH"'], {
+            encoding: 'utf-8',
+            stdio: ['ignore', 'pipe', 'ignore'],
+            timeout: 5000,
+        }).stdout.trim();
+    }
+    catch {
+        return '';
+    }
+}

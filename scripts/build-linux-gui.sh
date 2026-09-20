@@ -29,6 +29,7 @@ UNPACK_DIR="$PROJECT_ROOT/unpacked/app-64"
 RESOURCES_DIR="$UNPACK_DIR/resources"
 APP_ASAR="$RESOURCES_DIR/app.asar"
 APP_ASAR_BAK="$RESOURCES_DIR/app.asar.orig"
+APP_ASAR_UNPACKED="$RESOURCES_DIR/app.asar.unpacked"
 
 WORK_DIR="/tmp/mmx-app-v3"
 LOG_DIR="/tmp/mmx-logs"
@@ -93,9 +94,15 @@ ensure_unpacked() {
 extract_asar() {
   log "解 asar → $WORK_DIR ..."
   rm -rf "$WORK_DIR"
-  # === mmx-patch: || true 因为 asar 4.3.0/3.2.10 在含 SHA256 + 缺失 asar.unpacked 条目的 asar
-  # 上会报 ENOENT (e.g. pi-tui win32-arm64 .node), 但实际 44K 文件全部抽出。
-  # 这是 @electron/asar 已知 bug, 见 docs/PIPELINE.md §6.1
+  # === mmx-patch v2: NSIS 自带的 app.asar.unpacked/ (38MB, 含 pi-tui Linux JS + Windows .node)
+  # 必须 cp 到 app.asar.orig.unpacked/ (asar extract 期望的位置), 否则 asar 4.3.0 extractAll
+  # 会对每个 unpacked 文件 fs.readFileSync('app.asar.orig.unpacked/...') ENOENT, 整批中断
+  # (上一版用 || true 掩盖错误, 导致 jszip / pi-tui 大量文件 extract 失败)
+  if [ -d "$RESOURCES_DIR/app.asar.unpacked" ]; then
+    log "复制 NSIS 自带 asar.unpacked → asar.orig.unpacked (38MB) ..."
+    rm -rf "$RESOURCES_DIR/app.asar.orig.unpacked"
+    cp -a "$RESOURCES_DIR/app.asar.unpacked" "$RESOURCES_DIR/app.asar.orig.unpacked"
+  fi
   "$ASAR_TOOL" extract "$APP_ASAR_BAK" "$WORK_DIR" || true
   log "✓ asar 解包 ($(find $WORK_DIR -type f | wc -l) 个文件)"
 }
@@ -446,17 +453,80 @@ open(p, "w").write(s)
 print("[ok] deeplink/index.js patched")
 PYEOF
 
-  # --- native-sqlite-env: prebuild-install demote ---
+  # --- native-sqlite-env: 整文件替换为 Linux port 版 ---
+  # 3.0.73 的 stock 文件跟 3.0.67 差异大, 逐段 sed 会留半截引用
+  # (导出 resolveLocalRuntimeRepoRoot 但没定义 → module load ReferenceError → 主进程起不来)。
+  # src/native-sqlite-env.js.linux 是完整版: 优先把 MAVIS_SQLITE3_MODULE_PATH 指到
+  # asar.unpacked 里已注入的 Linux better-sqlite3, 跳过 dev 的 prebuild-install 流程。
+  cp "$PROJECT_ROOT/src/native-sqlite-env.js.linux" /tmp/mmx-app-v3/dist/main/modules/local-runtime/native-sqlite-env.js
+  print_msg="[ok] native-sqlite-env.js replaced (linux port)"
+  echo "$print_msg"
+
+  # --- @mavis/local-runtime better-sqlite3-loader: 允许 asar.unpacked 路径 ---
+  # stock 版 isAsarUnpackedPath 检查会拒绝 asar.unpacked 下的 override path,
+  # utility subprocess 回退 require('better-sqlite3') → handshake failed。
+  cp "$PROJECT_ROOT/src/better-sqlite3-loader.js.linux" /tmp/mmx-app-v3/node_modules/@mavis/local-runtime/dist/persistence/better-sqlite3-loader.js
+  echo "[ok] @mavis/local-runtime better-sqlite3-loader.js replaced (linux port)"
+
+  # --- local-runtime/index.js: getPromptConfigKey 强制 packaged 分支 ---
+  # 手动启 electron <app.asar> 时 app.isPackaged=false, stock 走 dev 分支
+  # require asar 里不存在的 scripts/prompt-config-key-package.cjs → 抛错被吞
+  # → "utility runtime initialization handshake failed" → LocalRuntime 起不来。
+  # asar 内 public/assets/img/{breakDown,computer_use}.png 有 maKs/mbKs 私 chunk,
+  # packaged:true 能读; 读不到降级 undefined (init 里该字段可选)。
   python3 << 'PYEOF'
-p = "/tmp/mmx-app-v3/dist/main/modules/local-runtime/native-sqlite-env.js"
+p = "/tmp/mmx-app-v3/dist/main/modules/local-runtime/index.js"
 s = open(p).read()
-if "(Linux runtime copy)" not in s:
-    s = s.replace(
-        "logger_1.default.error('[LocalRuntime] prebuild-install binary not found');",
-        "logger_1.default.info('[LocalRuntime] prebuild-install binary not found, skipping (Linux runtime copy)');",
-    )
-open(p, "w").write(s)
-print("[ok] native-sqlite-env.js patched")
+if "mmx-patch: getPromptConfigKey packaged on linux" not in s:
+    old = "getPromptConfigKey: () => (0, prompt_config_key_1.resolveDesktopPromptConfigKey)({ packaged: electron_1.app.isPackaged, appPath: electron_1.app.getAppPath() }),"
+    new = """getPromptConfigKey: () => {
+        try {
+            // === mmx-patch: getPromptConfigKey packaged on linux ===
+            return (0, prompt_config_key_1.resolveDesktopPromptConfigKey)({ packaged: true, appPath: electron_1.app.getAppPath() });
+        }
+        catch (e) {
+            logger_1.default.warn(`[LocalRuntime] prompt config key unavailable (mmx-patch): ${String(e)}`);
+            return undefined;
+        }
+    },"""
+    if old in s:
+        s = s.replace(old, new)
+        open(p, "w").write(s)
+        print("[ok] local-runtime/index.js getPromptConfigKey patched")
+    else:
+        print("[warn] getPromptConfigKey pattern not matched")
+else:
+    print("[ok] local-runtime/index.js already patched")
+PYEOF
+
+  # --- utility-process-manager: handshake catch 记录真实异常 ---
+  # stock `catch {}` 把 init 构造异常 (如 prompt-config-key) 吞成笼统的 handshake failed。
+  python3 << 'PYEOF'
+p = "/tmp/mmx-app-v3/dist/main/modules/local-runtime/utility/utility-process-manager.js"
+s = open(p).read()
+if "root cause" not in s:
+    old = """            catch {
+                clearStallTimer();
+                const latched = this.countInitFailure();
+                const message = 'utility runtime initialization handshake failed';
+                this.discardChild(child, latched ? { message, reasonCode: 'handshake_failed' } : null, startupToken);
+                settle(false);
+                logger.error(`[UtilityRuntime] ${message}`);"""
+    new = """            catch (handshakeErr) {
+                clearStallTimer();
+                const latched = this.countInitFailure();
+                const message = 'utility runtime initialization handshake failed';
+                this.discardChild(child, latched ? { message, reasonCode: 'handshake_failed' } : null, startupToken);
+                settle(false);
+                logger.error(`[UtilityRuntime] ${message}; root cause: ${handshakeErr && (handshakeErr.stack || handshakeErr.message || String(handshakeErr))}`);"""
+    if old in s:
+        s = s.replace(old, new)
+        open(p, "w").write(s)
+        print("[ok] utility-process-manager.js handshake catch logs root cause")
+    else:
+        print("[warn] handshake catch pattern not matched")
+else:
+    print("[ok] utility-process-manager.js already patched")
 PYEOF
 
   # --- mcode-tools: demote integration unavailable ---
@@ -517,10 +587,84 @@ PYEOF
 
 # ============ 步骤 5: Repack asar ============
 pack_asar() {
-  log "Repack asar → $APP_ASAR ..."
-  cd "$WORK_DIR"
-  "$ASAR_TOOL" pack . "$APP_ASAR" 2>&1 | tail -3
+  log "Repack asar → $APP_ASAR (preserving unpacked markers from orig) ..."
+  # === mmx-patch v3: 原版 asar 有 709 个 unpacked markers (jszip/pi-tui/better-sqlite3/node-pty/libnut/...).
+  # 上游脚本用 'asar pack' (无 --unpack) → marker 全部丢失 → 运行时 unpacked 文件找不到。
+  # 用 tools/repack-asar.cjs (仓库内置 helper), 从 app.asar.orig 读 markers 保留,
+  # set lookup (O(1)) 替代 minimatch glob 匹配 (O(n) + 40KB pattern 巨慢)
+  if [ ! -f "$PROJECT_ROOT/tools/repack-asar.cjs" ]; then
+    log "[error] tools/repack-asar.cjs 不存在, fall back to 标准 asar pack (会丢 markers)"
+    cd "$WORK_DIR"
+    "$ASAR_TOOL" pack . "$APP_ASAR" 2>&1 | tail -3
+  else
+    node "$PROJECT_ROOT/tools/repack-asar.cjs" "$WORK_DIR" "$APP_ASAR" "$APP_ASAR_BAK" 2>&1 | tail -5
+  fi
   log "✓ app.asar: $(ls -lh $APP_ASAR | awk '{print $5}')"
+}
+
+# ============ 步骤 6: better-sqlite3 的 JS 依赖放进 app.asar.unpacked ============
+# MAVIS_SQLITE3_MODULE_PATH 指向 app.asar.unpacked 后, better-sqlite3 的
+# require('bindings') 从真实 fs 解析 (不在 asar 虚拟 fs 里), 必须在
+# app.asar.unpacked/node_modules/ 下能找到 bindings + file-uri-to-path,
+# 否则 utility subprocess require 时 MODULE_NOT_FOUND → 子进程退出 → handshake failed。
+inject_better_sqlite3_deps() {
+  log "注入 better-sqlite3 JS deps (bindings, file-uri-to-path) → app.asar.unpacked/ ..."
+  MMX_ASAR="$APP_ASAR" MMX_DEST="$APP_ASAR_UNPACKED/node_modules" python3 << 'PYEOF'
+import json, os, struct, sys
+
+ASAR = os.environ.get("MMX_ASAR")
+DEST = os.environ.get("MMX_DEST")
+if not ASAR or not os.path.exists(ASAR):
+    print(f"[error] app.asar not found: {ASAR}"); sys.exit(1)
+if not DEST:
+    print("[error] MMX_DEST empty"); sys.exit(1)
+PKGS = ["bindings", "file-uri-to-path"]
+
+# 极简 asar reader: 读 4 字节 header size (含 pickle padding), 再读 header json
+with open(ASAR, "rb") as f:
+    raw = f.read()
+
+def read_pickle_header(buf):
+    # asar 磁盘布局 (Chromium Pickle):
+    #   [0:4]   sizePickle payload (=4)
+    #   [4:8]   headerPickle 总长度 (headerBuf.length)
+    #   [8:12]  headerPickle payload 长度
+    #   [12:16] JSON 字符串长度 (含 NUL 结尾)
+    #   [16:...] JSON + NUL + 4 字节对齐 padding
+    header_size = struct.unpack_from("<I", buf, 4)[0]
+    json_size = struct.unpack_from("<I", buf, 12)[0]
+    return json.loads(buf[16:16 + json_size].rstrip(b"\x00")), 8 + header_size
+
+header, base = read_pickle_header(raw)
+
+files_to_write = {}
+
+def walk(node, prefix):
+    for name, ent in (node.get("files") or {}).items():
+        p = f"{prefix}/{name}"
+        if "files" in ent:
+            walk(ent, p)
+        else:
+            files_to_write[p] = ent
+
+walk(header, "")
+
+count = 0
+for pkg in PKGS:
+    for p, ent in files_to_write.items():
+        if not p.startswith(f"/node_modules/{pkg}/"):
+            continue
+        if ent.get("unpacked"):
+            continue
+        rel = p[len("/node_modules/"):]
+        out = os.path.join(DEST, rel)
+        os.makedirs(os.path.dirname(out), exist_ok=True)
+        off = int(ent["offset"]); size = int(ent["size"])
+        with open(out, "wb") as o:
+            o.write(raw[base + off: base + off + size])
+        count += 1
+print(f"[ok] extracted {count} files into {DEST}")
+PYEOF
 }
 
 # ============ Main ============
@@ -535,6 +679,7 @@ main() {
   build_node_pty
   patch_js
   pack_asar
+  inject_better_sqlite3_deps
 
   log ""
   log "✅ 全部完成！启动:"

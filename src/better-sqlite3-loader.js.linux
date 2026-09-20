@@ -1,0 +1,28 @@
+import { createRequire } from 'node:module';
+import path from 'node:path';
+const require = createRequire(import.meta.url);
+export function loadBetterSqlite3Module() {
+    const overridePath = getBetterSqlite3ModuleOverridePath(process.env.MAVIS_SQLITE3_MODULE_PATH);
+    const mod = overridePath
+        ? createRequire(path.join(overridePath, 'package.json'))('better-sqlite3')
+        : require('better-sqlite3');
+    return normalizeBetterSqlite3Module(mod);
+}
+export function getBetterSqlite3ModuleOverridePath(value) {
+    const overridePath = value?.trim();
+    if (!overridePath)
+        return undefined;
+    // === mmx-patch v2: 允许 app.asar.unpacked 路径
+    // 原因: 这是 Linux desktop port (weekbin/linux-mcode-desktop) 的合法位置,
+    // better_sqlite3.node 的 Linux ELF 已经放到 asar.unpacked 下.
+    // 上游的 isAsarUnpackedPath 检查会让 utility subprocess 走 fallback require('better-sqlite3'),
+    // utilityProcess.fork 的 asar dlopen 重定向在 subprocess 上下文里行为不稳定, 导致 handshake failed.
+    return overridePath;
+}
+function normalizeBetterSqlite3Module(mod) {
+    return mod.default ?? mod;
+}
+function isAsarUnpackedPath(value) {
+    return path.normalize(value).split(path.sep).includes('app.asar.unpacked');
+}
+//# sourceMappingURL=better-sqlite3-loader.js.map

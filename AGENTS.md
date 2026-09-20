@@ -394,6 +394,53 @@ x-scheme-handler/minimax-cn-staging → minimax-linux.desktop ✓
 
 ## 7. Bug 修复日志 (按时间倒序)
 
+### 2026-09-20 — 3.0.73 port: 修 4 个阻断启动/Runtime 的 bug
+
+**环境**: MiniMax Code Setup 3.0.73.exe (NSIS) → Linux Electron 43.1.0, 宿主 Ubuntu 24.04 noble。
+
+**Bug A — `native-sqlite-env.js` 半截 patch, 主进程 module load 直接 ReferenceError**
+- 3.0.73 的 stock 文件导出 3 个函数 (prepareLocalRuntimeNativeSqliteEnv /
+  resolveLocalRuntimeRepoRoot / shouldUseDevNativeSqlite), 旧 sed 式 patch
+  只改一行, 但此前有手工替换把文件截断成只定义 1 个 →
+  `ReferenceError: resolveLocalRuntimeRepoRoot is not defined` → 主进程崩, 起不来。
+- **修法**: 整文件替换为 `src/native-sqlite-env.js.linux` (完整 3 函数,
+  优先把 MAVIS_SQLITE3_MODULE_PATH 指到 asar.unpacked 的 Linux better-sqlite3)。
+
+**Bug B — `@mavis/local-runtime` better-sqlite3-loader 拒绝 asar.unpacked 路径**
+- stock `isAsarUnpackedPath` 检查把 override path 打成 undefined → utility
+  subprocess 回退 `require('better-sqlite3')` → 加载失败。
+- **修法**: 整文件替换为 `src/better-sqlite3-loader.js.linux` (mmx-patch v2 接受)。
+
+**Bug C — utility subprocess require('bindings') MODULE_NOT_FOUND → 假 "handshake failed"**
+- MAVIS_SQLITE3_MODULE_PATH 指向 asar.unpacked 后, better-sqlite3 从真实 fs
+  解析 `bindings`/`file-uri-to-path`, 这俩纯 JS 包只在 asar 内部 → 子进程 require 抛错
+  退出 → main 在 spawn 时 postMessage 抛 "Channel closed" → 报
+  `utility runtime initialization handshake failed` (LocalRuntime 永远起不来)。
+- **修法**: `pack_asar` 后新增 `inject_better_sqlite3_deps` 步骤, 从打好包的
+  asar 里把 `bindings` + `file-uri-to-path` 抽到
+  `app.asar.unpacked/node_modules/` 下 (python 内联 asar reader, 零依赖)。
+
+**Bug D — `getPromptConfigKey` 走 dev 分支 require 不存在的 helper → 同上假 handshake**
+- 手动 `electron <app.asar>` 启动时 `app.isPackaged=false`, stock 逻辑
+  require `scripts/prompt-config-key-package.cjs` (不在 asar 里) → 异常在
+  `child.on('spawn')` 的 try 里被吞, 报 handshake failed。
+  (这个 catch 同时还吞真正的 postMessage 错误, 一并修了: catch 带 `handshakeErr`,
+  日志打 `root cause`。)
+- **修法**: patch `dist/main/modules/local-runtime/index.js` 强制
+  `packaged: true` 走 PNG carriers 分支 (asar 内 `public/assets/img/breakDown.png`
+  有 `maKs` chunk / `computer_use.png` 有 `mbKs` chunk, 实测可读), 取不到降级 undefined。
+
+**验证** (2026-09-20, noble 宿主 xvfb 直接跑 asar):
+- 主进程正常, WindowManager 注册 archon 窗口, renderer 起来;
+- UtilityRuntime stdout 持续输出 sandbox 事件, B1 binding 请求 success;
+- 无 GLIBC/fmod 错, 无 handshake 错; 仅剩 mcode-tools dev-resource 降级
+  (跟 3.0.67 一致, `ready_degraded`, 不阻断 login/runtime)。
+- state.db 要 OAuth 登录后才建 (docker/headless 测不到, 属预期)。
+
+**受影响文件**: `scripts/build-linux-gui.sh` (patch_js 整文件替换 ×2 + 新 patch ×2,
+新增 `inject_better_sqlite3_deps` 步骤); 新增 `src/native-sqlite-env.js.linux`、
+`src/better-sqlite3-loader.js.linux`。
+
 ### 2026-08-28 — 修 Bug 1 (OAuth scheme, 6 种)
 
 **问题**: 外部用户报 web 用 `minimax-code://` 唤不回. 实查 asar `getProtocolNameByEnv()` 动态返回 6 种 scheme (en/zh × prod/test/staging), 但 `.desktop` MimeType 只写 `minimax-cn` → en/test/staging 用户全 100% 唤不回.
